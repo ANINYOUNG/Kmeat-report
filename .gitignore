@@ -1,0 +1,10 @@
+# Python 관련 불필요한 파일들
+*.pyc
+__pycache__/
+*.env
+venv/
+.venv/
+
+# 중요한 비밀 파일 (절대 올리면 안 돼요!)
+*.json
+secrets.toml
