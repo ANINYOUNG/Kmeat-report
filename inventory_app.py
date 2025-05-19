@@ -1,4 +1,4 @@
-# inventory_app.py (Google Drive API - .xlsx 직접 로딩 버전 - 요일 표시 및 용어 변경 + 디버깅 코드 추가)
+# inventory_app.py (Google Drive API - .xlsx 직접 로딩 버전 - 요일 표시 및 용어 변경 + 디버깅 코드 추가 v2)
 
 import streamlit as st
 
@@ -32,45 +32,48 @@ SERVICE_ACCOUNT_LOADED = False
 # Streamlit Cloud 환경인지, Secrets가 제대로 로드되는지 확인하기 위한 코드입니다.
 # 문제가 해결된 후에는 이 디버깅 관련 st.write, st.error, st.text 문구들을 삭제하거나 주석 처리해주세요.
 
-st.write(f"환경 변수 IS_STREAMLIT_CLOUD 값: {os.getenv('IS_STREAMLIT_CLOUD')}") # Streamlit Cloud에서 설정하는 환경 변수 값 확인
-IS_CLOUD_ENVIRONMENT = os.getenv('IS_STREAMLIT_CLOUD') == 'true'
-st.write(f"IS_CLOUD_ENVIRONMENT 변수 평가 결과: {IS_CLOUD_ENVIRONMENT}") # 위 환경 변수를 기반으로 클라우드 환경인지 여부
+# 클라우드 환경 판단 로직 수정: st.secrets에 'google_creds_json' 키가 있는지 직접 확인
+# IS_CLOUD_ENVIRONMENT = os.getenv('IS_STREAMLIT_CLOUD') == 'true' # 이전 방식
+IS_CLOUD_ENVIRONMENT = "google_creds_json" in st.secrets
+st.write(f"st.secrets에 'google_creds_json' 키 존재 여부로 판단한 IS_CLOUD_ENVIRONMENT 변수 평가 결과: {IS_CLOUD_ENVIRONMENT}")
 
 if IS_CLOUD_ENVIRONMENT:
-    st.write("클라우드 환경으로 판단됨. st.secrets에서 인증 정보 로드를 시도합니다...")
-    if "google_creds_json" not in st.secrets:
-        st.error("오류: st.secrets에 'google_creds_json' 키가 없습니다! Streamlit Cloud 대시보드에서 Secrets 설정을 확인하세요.")
-        # st.write("현재 st.secrets에 있는 키 목록 (민감한 값은 제외):", st.secrets.to_dict().keys()) # 어떤 키들이 있는지 확인용
-    else:
-        try:
-            creds_json_str = st.secrets["google_creds_json"]
-            st.success("'google_creds_json' 키를 st.secrets에서 성공적으로 가져왔습니다.")
-            # st.text("가져온 JSON 문자열의 일부 (앞 100자): " + creds_json_str[:100] + "...") # 실제 값의 일부를 보고 싶을 때 (주의!)
+    st.write("클라우드 환경으로 판단됨 (st.secrets에 'google_creds_json' 키 존재). st.secrets에서 인증 정보 로드를 시도합니다...")
+    # if "google_creds_json" not in st.secrets: # 위에서 이미 확인했으므로 이 조건문은 사실상 항상 참이 됨
+    #     st.error("오류: st.secrets에 'google_creds_json' 키가 없습니다! Streamlit Cloud 대시보드에서 Secrets 설정을 확인하세요.")
+    # else:
+    try:
+        creds_json_str = st.secrets["google_creds_json"]
+        st.success("'google_creds_json' 키를 st.secrets에서 성공적으로 가져왔습니다.")
+        # st.text("가져온 JSON 문자열의 일부 (앞 100자): " + creds_json_str[:100] + "...") # 실제 값의 일부를 보고 싶을 때 (주의!)
 
-            creds_dict = json.loads(creds_json_str) # JSON 문자열을 파이썬 딕셔너리로 변환
-            st.success("st.secrets에서 가져온 JSON 문자열을 성공적으로 파싱했습니다.")
+        creds_dict = json.loads(creds_json_str) # JSON 문자열을 파이썬 딕셔너리로 변환
+        st.success("st.secrets에서 가져온 JSON 문자열을 성공적으로 파싱했습니다.")
 
-            scopes = ['https://www.googleapis.com/auth/drive.readonly']
-            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-            drive_service = build('drive', 'v3', credentials=creds)
-            SERVICE_ACCOUNT_LOADED = True
-            st.success("Google Drive 서비스가 성공적으로 초기화되었습니다. SERVICE_ACCOUNT_LOADED = True")
-        except json.JSONDecodeError as e_json:
-            st.error(f"JSON 파싱 오류: st.secrets의 'google_creds_json' 내용을 파싱하는 중 오류가 발생했습니다: {e_json}")
-            st.error("Secrets에 입력된 JSON 문자열이 올바른 형식인지, 특히 줄바꿈, 따옴표 등이 정확한지 확인해주세요.")
-            st.text("문제가 되는 JSON 문자열의 일부 (앞 200자): " + creds_json_str[:200] + "...") # 문제 부분 확인용
-        except KeyError: # 이 경우는 "google_creds_json" not in st.secrets 에서 이미 걸러지지만, 만약을 위해 남겨둡니다.
-            st.error("KeyError: st.secrets에서 'google_creds_json' 키를 찾을 수 없습니다.")
-            if 'sidebar_error_displayed' not in st.session_state: # 기존 오류 메시지 유지
-                st.sidebar.error("오류: 클라우드 Secrets에 'google_creds_json' 키가 없습니다. 관리자에게 문의하세요.")
-                st.session_state.sidebar_error_displayed = True
-        except Exception as e_secrets:
-            st.error(f"클라우드 Secrets 처리 중 예상치 못한 예외 발생: {e_secrets}")
-            if 'sidebar_error_displayed' not in st.session_state: # 기존 오류 메시지 유지
-                st.sidebar.error(f"오류: 클라우드 Secrets 인증 중 예외 발생: {e_secrets}")
-                st.session_state.sidebar_error_displayed = True
+        scopes = ['https://www.googleapis.com/auth/drive.readonly']
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        drive_service = build('drive', 'v3', credentials=creds)
+        SERVICE_ACCOUNT_LOADED = True
+        st.success("Google Drive 서비스가 성공적으로 초기화되었습니다. SERVICE_ACCOUNT_LOADED = True")
+    except json.JSONDecodeError as e_json:
+        st.error(f"JSON 파싱 오류: st.secrets의 'google_creds_json' 내용을 파싱하는 중 오류가 발생했습니다: {e_json}")
+        st.error("Secrets에 입력된 JSON 문자열이 올바른 형식인지, 특히 줄바꿈, 따옴표 등이 정확한지 확인해주세요.")
+        if 'creds_json_str' in locals(): # creds_json_str 변수가 정의된 경우에만 출력
+             st.text("문제가 되는 JSON 문자열의 일부 (앞 200자): " + creds_json_str[:200] + "...") # 문제 부분 확인용
+        else:
+            st.text("creds_json_str을 st.secrets에서 가져오지 못했습니다.")
+    except KeyError:
+        st.error("KeyError: st.secrets에서 'google_creds_json' 키를 찾을 수 없습니다. (이 메시지는 IS_CLOUD_ENVIRONMENT 로직 변경 후 나타나기 어려움)")
+        if 'sidebar_error_displayed' not in st.session_state:
+            st.sidebar.error("오류: 클라우드 Secrets에 'google_creds_json' 키가 없습니다. 관리자에게 문의하세요.")
+            st.session_state.sidebar_error_displayed = True
+    except Exception as e_secrets:
+        st.error(f"클라우드 Secrets 처리 중 예상치 못한 예외 발생: {e_secrets}")
+        if 'sidebar_error_displayed' not in st.session_state:
+            st.sidebar.error(f"오류: 클라우드 Secrets 인증 중 예외 발생: {e_secrets}")
+            st.session_state.sidebar_error_displayed = True
 else:
-    st.write("클라우드 환경이 아님 (또는 IS_CLOUD_ENVIRONMENT가 False). 로컬 파일에서 인증 정보 로드를 시도합니다.")
+    st.write("클라우드 환경이 아님 (st.secrets에 'google_creds_json' 키 없음). 로컬 파일에서 인증 정보 로드를 시도합니다.")
 # --- !!! 중요: 디버깅 코드 끝 !!! ---
 
 
@@ -86,7 +89,7 @@ if not SERVICE_ACCOUNT_LOADED:
             SERVICE_ACCOUNT_LOADED = True
             st.info(f"로컬 파일({SERVICE_ACCOUNT_FILE})에서 성공적으로 인증 정보를 로드했습니다. SERVICE_ACCOUNT_LOADED = True")
         else:
-            if not IS_CLOUD_ENVIRONMENT: # 클라우드 환경이 아닐 때만 이 경고를 표시 (디버깅 메시지와 중복될 수 있음)
+            if not IS_CLOUD_ENVIRONMENT:
                 st.warning(f"경고: 서비스 계정 키 파일을 찾을 수 없습니다: {SERVICE_ACCOUNT_FILE}. Google Drive 연동 기능이 제한될 수 있습니다.")
                 if 'sidebar_error_displayed' not in st.session_state:
                     st.session_state.sidebar_error_displayed = True
