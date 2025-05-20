@@ -1,18 +1,18 @@
-# pages/4_재고_보충_제안.py
+# pages/4_재고_보충_제안.py (ImportError 및 Cloud용 수정)
 
 import streamlit as st
 import pandas as pd
 import datetime
 from dateutil.relativedelta import relativedelta
-# import os # os.path.exists는 더 이상 직접 사용하지 않음
 import io # BytesIO 사용을 위해 필요
 import traceback # 예외 처리용
 
 # common_utils.py 에서 공통 유틸리티 함수 가져오기
+# DATA_FOLDER, SM_FILE은 로컬 경로이므로 common_utils에서 가져오지 않습니다.
+# get_all_available_sheet_dates 대신 get_all_available_sheet_dates_from_bytes를 사용합니다.
 from common_utils import download_excel_from_drive_as_bytes, get_all_available_sheet_dates_from_bytes
 
 # --- Google Drive 파일 ID 정의 ---
-# 사용자님이 제공해주신 실제 파일 ID를 사용합니다.
 SALES_FILE_ID = "1h-V7kIoInXgGLll7YBW5V_uZdF3Q1PdY"  # 매출내역 파일 ID
 SM_FILE_ID = "1tRljdvOpp4fITaVEXvoL9mNveNg2qt4p"    # SM재고현황 파일 ID
 # --- 파일 ID 정의 끝 ---
@@ -23,7 +23,7 @@ SALES_DATA_SHEET_NAME = 's-list' # 매출내역 파일의 시트 이름
 # 컬럼명 상수
 SALES_DATE_COL = '매출일자'
 SALES_PROD_CODE_COL = '상품코드'
-SALES_PROD_NAME_COL = '상  품  명' # 원본 파일의 상품명 컬럼 (공백 2칸 포함 가능성 있음)
+SALES_PROD_NAME_COL = '상  품  명' 
 SALES_QTY_BOX_COL = '수량(Box)'
 SALES_QTY_KG_COL = '수량(Kg)'
 SALES_LOCATION_COL = '지점명'
@@ -100,7 +100,7 @@ def load_sales_history_and_filter_3m(_drive_service, file_id_sales, sheet_name, 
             st.warning(f"선택된 기간의 매출 데이터가 '{sheet_name}' 시트에 없습니다.")
             return pd.DataFrame()
         
-        st.success(f"필터링된 매출 데이터: {len(df_filtered)} 행")
+        # st.success(f"필터링된 매출 데이터: {len(df_filtered)} 행") # 성공 메시지 간소화
 
         total_sales_by_item_loc = df_filtered.groupby(
             [SALES_PROD_CODE_COL, SALES_PROD_NAME_COL, SALES_LOCATION_COL], 
@@ -129,24 +129,20 @@ def load_current_stock_data(_drive_service, file_id_sm):
 
     sm_file_bytes = download_excel_from_drive_as_bytes(_drive_service, file_id_sm, "SM재고현황 (현재고 조회용)")
     if not sm_file_bytes:
-        return pd.DataFrame()
+        return pd.DataFrame() # 오류 메시지는 download 함수에서 처리
 
+    # common_utils의 get_all_available_sheet_dates_from_bytes 사용
     available_sm_dates = get_all_available_sheet_dates_from_bytes(sm_file_bytes, "SM재고현황 (현재고 조회용)")
     if not available_sm_dates:
         st.warning(f"SM재고현황 파일 (ID: {file_id_sm})에서 사용 가능한 재고 데이터 시트를 찾을 수 없습니다.")
         return pd.DataFrame()
 
-    latest_date_obj = available_sm_dates[0] # get_all_available_sheet_dates_from_bytes는 최신순 정렬
+    latest_date_obj = available_sm_dates[0] 
     latest_date_str = latest_date_obj.strftime("%Y%m%d")
     st.info(f"현재고 기준일: {latest_date_obj.strftime('%Y-%m-%d')} (시트: {latest_date_str})")
 
     try:
-        # BytesIO 객체를 재사용하려면 seek(0)이 필요할 수 있으나, pd.read_excel은 보통 내부적으로 처리.
-        # 만약 문제가 발생하면, sm_file_bytes.seek(0)을 pd.read_excel 전에 호출.
-        # 여기서는 download_excel_from_drive_as_bytes가 매번 새 BytesIO를 반환하므로 괜찮을 수 있음.
-        # 다만, 캐싱을 고려하면 동일한 file_bytes에 대해 여러번 read_excel을 할 수 있으므로 주의.
-        # 가장 안전한 방법은 pd.read_excel 전에 sm_file_bytes.seek(0)을 하는 것입니다.
-        sm_file_bytes.seek(0) # pd.ExcelFile을 여러번 사용하거나, 같은 BytesIO로 여러 시트를 읽을 때 필요
+        sm_file_bytes.seek(0) 
         df_stock_raw = pd.read_excel(sm_file_bytes, sheet_name=latest_date_str)
         
         required_stock_cols = [CURRENT_STOCK_PROD_CODE_COL, CURRENT_STOCK_PROD_NAME_COL, 
@@ -176,7 +172,7 @@ def load_current_stock_data(_drive_service, file_id_sm):
             st.warning(f"현재고 데이터 그룹핑 후 데이터가 없습니다 ({latest_date_str}, ID: {file_id_sm}).")
             return pd.DataFrame()
 
-        st.success(f"현재고 데이터 처리 완료: {len(current_stock_by_item_loc)}개 품목(지점별).")
+        # st.success(f"현재고 데이터 처리 완료: {len(current_stock_by_item_loc)}개 품목(지점별).")
         return current_stock_by_item_loc
     except ValueError as ve:
         if latest_date_str and f"Worksheet named '{latest_date_str}' not found" in str(ve):
@@ -274,9 +270,7 @@ else:
     cols_to_make_int_for_display = ['월평균 출고량(박스)', '필요수량(박스)', '잔량(박스)']
     for col in cols_to_make_int_for_display:
         if col in df_display.columns:
-            # Int64로 변환하기 전에 NaN이 아닌 유효한 숫자로만 구성되어 있는지 확인
             df_display[col] = pd.to_numeric(df_display[col], errors='coerce').fillna(0).round(0).astype('Int64')
-
 
     format_dict = {}
     for col in ['잔량(박스)', '월평균 출고량(박스)', '필요수량(박스)']:
@@ -289,11 +283,10 @@ else:
     
     st.dataframe(df_display.style.format(format_dict, na_rep="-").set_properties(**{'text-align': 'right'}), use_container_width=True)
 
-    @st.cache_data # 이 함수는 내부에서 외부 상태(drive_service 등)를 참조하지 않으므로 간단히 캐시 가능
+    @st.cache_data
     def convert_df_to_excel(df_to_convert):
-        # from io import BytesIO # 파일 상단에 이미 import 되어 있음
         excel_stream = io.BytesIO()
-        with pd.ExcelWriter(excel_stream, engine='xlsxwriter') as writer:
+        with pd.ExcelWriter(excel_stream, engine='xlsxwriter') as writer: # engine 명시
             df_to_convert.to_excel(writer, index=False, sheet_name='보고서')
         excel_stream.seek(0)
         return excel_stream.getvalue()
