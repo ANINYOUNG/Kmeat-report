@@ -4,18 +4,26 @@ import streamlit as st
 import pandas as pd
 import datetime
 from dateutil.relativedelta import relativedelta
-import os
+# import os # os.path.exists는 더 이상 직접 사용하지 않음
 import io # BytesIO 사용을 위해 필요
-# common_utils.py 에서 공통 파일 경로 및 유틸리티 함수 가져오기
-from common_utils import DATA_FOLDER, SM_FILE, get_all_available_sheet_dates
+import traceback # 예외 처리용
 
-# --- 보고서에 사용할 상수 ---
-SALES_DATA_FILE_PATH = os.path.join(DATA_FOLDER, '매출내역.xlsx')
-SALES_DATA_SHEET_NAME = 's-list'
+# common_utils.py 에서 공통 유틸리티 함수 가져오기
+from common_utils import download_excel_from_drive_as_bytes, get_all_available_sheet_dates_from_bytes
 
+# --- Google Drive 파일 ID 정의 ---
+# 사용자님이 제공해주신 실제 파일 ID를 사용합니다.
+SALES_FILE_ID = "1h-V7kIoInXgGLll7YBW5V_uZdF3Q1PdY"  # 매출내역 파일 ID
+SM_FILE_ID = "1tRljdvOpp4fITaVEXvoL9mNveNg2qt4p"    # SM재고현황 파일 ID
+# --- 파일 ID 정의 끝 ---
+
+# --- 이 페이지 고유의 설정 ---
+SALES_DATA_SHEET_NAME = 's-list' # 매출내역 파일의 시트 이름
+
+# 컬럼명 상수
 SALES_DATE_COL = '매출일자'
 SALES_PROD_CODE_COL = '상품코드'
-SALES_PROD_NAME_COL = '상  품  명' 
+SALES_PROD_NAME_COL = '상  품  명' # 원본 파일의 상품명 컬럼 (공백 2칸 포함 가능성 있음)
 SALES_QTY_BOX_COL = '수량(Box)'
 SALES_QTY_KG_COL = '수량(Kg)'
 SALES_LOCATION_COL = '지점명'
@@ -26,29 +34,43 @@ CURRENT_STOCK_QTY_COL = '잔량(박스)'
 CURRENT_STOCK_WGT_COL = '잔량(Kg)'
 CURRENT_STOCK_LOCATION_COL = '지점명'
 
+# --- Google Drive 서비스 객체 가져오기 ---
+retrieved_drive_service = st.session_state.get('drive_service')
+page_title_for_debug = "재고 보충 제안 페이지" 
 
-@st.cache_data
-def load_sales_history_and_filter_3m(filepath, sheet_name, num_months=3):
+if retrieved_drive_service:
+    st.sidebar.info(f"'{page_title_for_debug}'에서 Drive Service 로드 성공!")
+else:
+    st.sidebar.error(f"'{page_title_for_debug}'에서 Drive Service 로드 실패! (None). 메인 페이지를 먼저 방문하여 인증을 완료해주세요.")
+
+drive_service = retrieved_drive_service
+
+@st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
+def load_sales_history_and_filter_3m(_drive_service, file_id_sales, sheet_name, num_months=3):
     """
-    지정된 엑셀 파일/시트에서 전체 매출 데이터를 로드하고,
+    지정된 Google Drive 파일/시트에서 전체 매출 데이터를 로드하고,
     지난 N개의 완전한 달력 월 데이터를 필터링하여 [상품코드, 상품명, 지점명]별 총 출고량을 반환합니다.
     """
-    try:
-        if not os.path.exists(filepath):
-            st.error(f"오류: 매출 파일 '{os.path.basename(filepath)}' 없음")
-            return pd.DataFrame()
+    if _drive_service is None:
+        st.error("오류: Google Drive 서비스가 초기화되지 않았습니다. (매출 데이터 로딩)")
+        return pd.DataFrame()
 
+    file_bytes_sales = download_excel_from_drive_as_bytes(_drive_service, file_id_sales, f"매출내역 ({sheet_name})")
+    if file_bytes_sales is None:
+        return pd.DataFrame()
+        
+    try:
         required_cols = [SALES_DATE_COL, SALES_PROD_CODE_COL, SALES_PROD_NAME_COL, 
                          SALES_QTY_BOX_COL, SALES_QTY_KG_COL, SALES_LOCATION_COL]
         
-        df = pd.read_excel(filepath, sheet_name=sheet_name)
-        # st.info(f"'{os.path.basename(filepath)}' ({sheet_name}) 시트 원본 데이터 로드: {len(df)} 행") # 사용자에게 필요한 정보면 유지
-
+        df = pd.read_excel(file_bytes_sales, sheet_name=sheet_name)
+        
         if not all(col in df.columns for col in required_cols):
             missing_cols = [col for col in required_cols if col not in df.columns]
-            st.error(f"오류: 매출 시트에 필요한 컬럼({missing_cols}) 없음. 상수 또는 파일 내 컬럼명을 확인하세요.")
+            st.error(f"오류: 매출 내역 시트 '{sheet_name}' (ID: {file_id_sales})에 필요한 컬럼({missing_cols}) 없음")
+            st.write(f"사용 가능한 컬럼: {df.columns.tolist()}")
             return pd.DataFrame()
-
+        
         df[SALES_DATE_COL] = pd.to_datetime(df[SALES_DATE_COL], errors='coerce')
         df.dropna(subset=[SALES_DATE_COL], inplace=True)
         
@@ -59,6 +81,7 @@ def load_sales_history_and_filter_3m(filepath, sheet_name, num_months=3):
         df[SALES_QTY_KG_COL] = pd.to_numeric(df[SALES_QTY_KG_COL], errors='coerce').fillna(0)
 
         if df.empty:
+            st.warning(f"매출내역 파일 (ID: {file_id_sales}, 시트: {sheet_name})에 유효한 데이터가 없습니다.")
             return pd.DataFrame()
 
         today = pd.Timestamp.today().normalize()
@@ -74,7 +97,7 @@ def load_sales_history_and_filter_3m(filepath, sheet_name, num_months=3):
         ].copy()
 
         if df_filtered.empty:
-            st.warning(f"선택된 기간 ({start_date_of_analysis_period.strftime('%Y-%m-%d')} ~ {end_date_of_last_full_month.strftime('%Y-%m-%d')})의 매출 데이터가 '{sheet_name}' 시트에 없습니다.")
+            st.warning(f"선택된 기간의 매출 데이터가 '{sheet_name}' 시트에 없습니다.")
             return pd.DataFrame()
         
         st.success(f"필터링된 매출 데이터: {len(df_filtered)} 행")
@@ -87,39 +110,51 @@ def load_sales_history_and_filter_3m(filepath, sheet_name, num_months=3):
             TotalQtyKg=(SALES_QTY_KG_COL, 'sum')
         )
         return total_sales_by_item_loc
-    except FileNotFoundError:
-        st.error(f"오류: 매출 파일 '{os.path.basename(filepath)}' 없음")
-        return pd.DataFrame()
     except ValueError as ve:
         if sheet_name and f"Worksheet named '{sheet_name}' not found" in str(ve):
-            st.error(f"오류: 매출 파일 '{os.path.basename(filepath)}'에 '{sheet_name}' 시트 없음")
+            st.error(f"오류: 매출 파일 (ID: {file_id_sales})에 '{sheet_name}' 시트 없음")
         else:
-            st.error(f"매출 데이터 로드 중 값 오류: {ve}")
+            st.error(f"매출 데이터 (ID: {file_id_sales}) 로드 중 값 오류: {ve}")
         return pd.DataFrame()
     except Exception as e:
-        st.error(f"매출 데이터 로드/처리 중 예상 못한 오류: {e}")
+        st.error(f"매출 데이터 (ID: {file_id_sales}) 로드/처리 중 예상 못한 오류: {e}")
         return pd.DataFrame()
 
-@st.cache_data
-def load_current_stock_data(sm_filepath):
-    available_sm_dates = get_all_available_sheet_dates(sm_filepath) 
+@st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
+def load_current_stock_data(_drive_service, file_id_sm):
+    """SM재고현황 파일의 최신 날짜 시트에서 현재고 데이터를 로드합니다."""
+    if _drive_service is None:
+        st.error("오류: Google Drive 서비스가 초기화되지 않았습니다. (현재고 데이터 로딩)")
+        return pd.DataFrame()
+
+    sm_file_bytes = download_excel_from_drive_as_bytes(_drive_service, file_id_sm, "SM재고현황 (현재고 조회용)")
+    if not sm_file_bytes:
+        return pd.DataFrame()
+
+    available_sm_dates = get_all_available_sheet_dates_from_bytes(sm_file_bytes, "SM재고현황 (현재고 조회용)")
     if not available_sm_dates:
-        st.warning(f"'{os.path.basename(sm_filepath)}'에서 사용 가능한 재고 데이터 시트를 찾을 수 없습니다.")
+        st.warning(f"SM재고현황 파일 (ID: {file_id_sm})에서 사용 가능한 재고 데이터 시트를 찾을 수 없습니다.")
         return pd.DataFrame()
 
-    latest_date_obj = available_sm_dates[0]
+    latest_date_obj = available_sm_dates[0] # get_all_available_sheet_dates_from_bytes는 최신순 정렬
     latest_date_str = latest_date_obj.strftime("%Y%m%d")
     st.info(f"현재고 기준일: {latest_date_obj.strftime('%Y-%m-%d')} (시트: {latest_date_str})")
 
     try:
-        df_stock_raw = pd.read_excel(sm_filepath, sheet_name=latest_date_str)
+        # BytesIO 객체를 재사용하려면 seek(0)이 필요할 수 있으나, pd.read_excel은 보통 내부적으로 처리.
+        # 만약 문제가 발생하면, sm_file_bytes.seek(0)을 pd.read_excel 전에 호출.
+        # 여기서는 download_excel_from_drive_as_bytes가 매번 새 BytesIO를 반환하므로 괜찮을 수 있음.
+        # 다만, 캐싱을 고려하면 동일한 file_bytes에 대해 여러번 read_excel을 할 수 있으므로 주의.
+        # 가장 안전한 방법은 pd.read_excel 전에 sm_file_bytes.seek(0)을 하는 것입니다.
+        sm_file_bytes.seek(0) # pd.ExcelFile을 여러번 사용하거나, 같은 BytesIO로 여러 시트를 읽을 때 필요
+        df_stock_raw = pd.read_excel(sm_file_bytes, sheet_name=latest_date_str)
         
         required_stock_cols = [CURRENT_STOCK_PROD_CODE_COL, CURRENT_STOCK_PROD_NAME_COL, 
                                CURRENT_STOCK_QTY_COL, CURRENT_STOCK_WGT_COL, CURRENT_STOCK_LOCATION_COL]
         
         if not all(col in df_stock_raw.columns for col in required_stock_cols):
             missing = [col for col in required_stock_cols if col not in df_stock_raw.columns]
-            st.error(f"현재고 데이터 시트({latest_date_str})에 필수 컬럼이 없습니다: {missing}.")
+            st.error(f"현재고 데이터 시트({latest_date_str}, ID: {file_id_sm})에 필수 컬럼이 없습니다: {missing}.")
             st.error("코드 상단의 현재고 관련 상수(CURRENT_STOCK_..._COL)와 실제 엑셀 파일의 컬럼명을 확인해주세요.")
             return pd.DataFrame()
 
@@ -138,25 +173,36 @@ def load_current_stock_data(sm_filepath):
         )
         
         if current_stock_by_item_loc.empty and not df_stock_raw.empty:
-            st.warning(f"현재고 데이터 그룹핑 후 데이터가 없습니다 ({latest_date_str}).")
+            st.warning(f"현재고 데이터 그룹핑 후 데이터가 없습니다 ({latest_date_str}, ID: {file_id_sm}).")
             return pd.DataFrame()
 
         st.success(f"현재고 데이터 처리 완료: {len(current_stock_by_item_loc)}개 품목(지점별).")
         return current_stock_by_item_loc
+    except ValueError as ve:
+        if latest_date_str and f"Worksheet named '{latest_date_str}' not found" in str(ve):
+            st.error(f"오류: 현재고 파일 (ID: {file_id_sm})에 '{latest_date_str}' 시트 없음")
+        else:
+            st.error(f"현재고 데이터 (ID: {file_id_sm}) 로드 중 값 오류: {ve}")
+        return pd.DataFrame()
     except Exception as e:
-        st.error(f"현재고 데이터 로드/처리 중 예외 발생 ({latest_date_str}): {e}")
+        st.error(f"현재고 데이터 (ID: {file_id_sm}, 시트: {latest_date_str}) 로드/처리 중 예외 발생: {e}")
         return pd.DataFrame()
 
 # --- Streamlit 페이지 UI 및 로직 ---
 st.title("📦 재고 보충 제안 보고서 (지점별)")
+
+if drive_service is None: 
+    st.error("Google Drive 서비스에 연결되지 않았습니다. 앱의 메인 페이지를 방문하여 인증을 완료하거나, 앱 설정을 확인해주세요.")
+    st.stop()
+
 st.markdown("최근 3개월간의 월평균 출고량과 현재고를 **지점별로** 비교하여 보충 필요 수량을 제안합니다.")
-st.markdown(f"매출 데이터 원본: '{os.path.basename(SALES_DATA_FILE_PATH)}' 파일의 '{SALES_DATA_SHEET_NAME}' 시트")
-st.markdown(f"현재고 데이터 원본: '{os.path.basename(SM_FILE)}' 파일의 최신 날짜 시트")
+st.markdown(f"매출 데이터 원본: Google Drive 파일 (ID: `{SALES_FILE_ID}`)의 '{SALES_DATA_SHEET_NAME}' 시트")
+st.markdown(f"현재고 데이터 원본: Google Drive 파일 (ID: `{SM_FILE_ID}`)의 최신 날짜 시트")
 st.markdown("---")
 
 num_months_to_analyze = 3
-df_total_sales_3m = load_sales_history_and_filter_3m(SALES_DATA_FILE_PATH, SALES_DATA_SHEET_NAME, num_months=num_months_to_analyze)
-df_current_stock = load_current_stock_data(SM_FILE)
+df_total_sales_3m = load_sales_history_and_filter_3m(drive_service, SALES_FILE_ID, SALES_DATA_SHEET_NAME, num_months=num_months_to_analyze)
+df_current_stock = load_current_stock_data(drive_service, SM_FILE_ID)
 
 if df_total_sales_3m.empty or df_current_stock.empty:
     st.warning("매출 데이터 또는 현재고 데이터가 없어 보고서를 생성할 수 없습니다. 위의 로그 메시지를 확인해주세요.")
@@ -228,7 +274,9 @@ else:
     cols_to_make_int_for_display = ['월평균 출고량(박스)', '필요수량(박스)', '잔량(박스)']
     for col in cols_to_make_int_for_display:
         if col in df_display.columns:
-            df_display[col] = pd.to_numeric(df_display[col], errors='coerce').round(0).astype('Int64')
+            # Int64로 변환하기 전에 NaN이 아닌 유효한 숫자로만 구성되어 있는지 확인
+            df_display[col] = pd.to_numeric(df_display[col], errors='coerce').fillna(0).round(0).astype('Int64')
+
 
     format_dict = {}
     for col in ['잔량(박스)', '월평균 출고량(박스)', '필요수량(박스)']:
@@ -241,10 +289,10 @@ else:
     
     st.dataframe(df_display.style.format(format_dict, na_rep="-").set_properties(**{'text-align': 'right'}), use_container_width=True)
 
-    @st.cache_data
+    @st.cache_data # 이 함수는 내부에서 외부 상태(drive_service 등)를 참조하지 않으므로 간단히 캐시 가능
     def convert_df_to_excel(df_to_convert):
-        from io import BytesIO
-        excel_stream = BytesIO()
+        # from io import BytesIO # 파일 상단에 이미 import 되어 있음
+        excel_stream = io.BytesIO()
         with pd.ExcelWriter(excel_stream, engine='xlsxwriter') as writer:
             df_to_convert.to_excel(writer, index=False, sheet_name='보고서')
         excel_stream.seek(0)
