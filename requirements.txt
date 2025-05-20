@@ -1,17 +1,9 @@
-streamlit
-pandas
-plotly
-google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
-openpyxl
-python-dateutil
-folium
-datetime
-os
-traceback
-numpy as np
-from dateutil.relativedelta import relativedelta
-import io
-from common_utils import DATA_FOLDER, SM_FILE, get_all_available_sheet_dates
-from io import BytesIO
+folium==0.19.4
+google_api_python_client==2.169.0
+numpy==2.2.6
+pandas==2.2.3
+plotly==6.0.1
+protobuf==6.31.0
+python_dateutil==2.9.0.post0
+streamlit==1.41.1
+streamlit_folium==0.24.0
