@@ -1,4 +1,4 @@
-# pages/3_일일_재고_확인.py (장기 재고 현황에 입고당시 Box/Kg 수량 추가 및 Cloud용 수정)
+# pages/3_일일_재고_확인.py (장기 재고 현황에 입고당시 Box/Kg 수량 추가 및 Cloud용 수정, 입고번호 추가)
 
 import streamlit as st
 import pandas as pd
@@ -19,6 +19,7 @@ SM_FILE_ID = "1tRljdvOpp4fITaVEXvoL9mNveNg2qt4p" # SM재고현황 파일 ID
 # --- 파일 ID 정의 끝 ---
 
 # --- 이 페이지 고유의 설정 ---
+RECEIPT_NUMBER_COL = '번호' # 입고번호 컬럼명 (SM재고현황 파일 기준)
 PROD_CODE_COL = '상품코드'
 PROD_NAME_COL = '상품명'
 BRANCH_COL = '지점명'
@@ -30,7 +31,8 @@ INITIAL_QTY_BOX_COL = 'Box'      # 입고 당시 박스 수량 컬럼명 (SM재�
 INITIAL_QTY_KG_COL = '입고(Kg)'  # 입고 당시 Kg 수량 컬럼명 (SM재고 파일 기준)
 REMAINING_DAYS_COL = '잔여일수'
 
-REQUIRED_COLS_FOR_PAGE = [PROD_CODE_COL, PROD_NAME_COL, BRANCH_COL, QTY_COL, WGT_COL,
+# REQUIRED_COLS_FOR_PAGE에 RECEIPT_NUMBER_COL 추가
+REQUIRED_COLS_FOR_PAGE = [RECEIPT_NUMBER_COL, PROD_CODE_COL, PROD_NAME_COL, BRANCH_COL, QTY_COL, WGT_COL,
                           EXP_DATE_COL, RECEIPT_DATE_COL, 
                           INITIAL_QTY_BOX_COL, INITIAL_QTY_KG_COL, 
                           REMAINING_DAYS_COL]
@@ -54,7 +56,7 @@ drive_service = retrieved_drive_service
 
 @st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
 def find_latest_sheet(_drive_service, file_id_sm):
-    """Google Drive의 Excel 파일에서 YYYYMMDD 형식의 가장 최신 날짜 시트 이름을 찾습니다."""
+    """Google Drive의 Excel 파일에서 أغسطسMMDD 형식의 가장 최신 날짜 시트 이름을 찾습니다."""
     if _drive_service is None:
         st.error("오류: Google Drive 서비스가 초기화되지 않았습니다. (최신 시트 검색)")
         return None
@@ -68,7 +70,7 @@ def find_latest_sheet(_drive_service, file_id_sm):
             sheet_names = xls.sheet_names
             date_sheets = [name for name in sheet_names if len(name) == 8 and name.isdigit()]
             if not date_sheets: 
-                st.error(f"오류: SM재고현황 파일 (ID: {file_id_sm})에 YYYYMMDD 형식 시트 없음")
+                st.error(f"오류: SM재고현황 파일 (ID: {file_id_sm})에 أغسطسMMDD 형식 시트 없음")
                 return None
             latest_sheet = max(date_sheets)
             return latest_sheet
@@ -90,10 +92,12 @@ def load_sm_sheet_for_daily_check(_drive_service, file_id_sm, sheet_name):
     try:
         df = pd.read_excel(file_bytes_sm, sheet_name=sheet_name)
 
+        # 필수 컬럼 존재 여부 확인 및 처리
         missing_cols = [col for col in REQUIRED_COLS_FOR_PAGE if col not in df.columns]
         if missing_cols:
-            st.warning(f"SM 시트 '{sheet_name}'에 다음 필수 컬럼이 없습니다: {missing_cols}")
-            # 누락된 입고 당시 수량 컬럼들은 0으로 채워진 새 컬럼 생성 (기존 로직 유지)
+            st.warning(f"SM 시트 '{sheet_name}'에 다음 필수 컬럼이 없습니다: {', '.join(missing_cols)}")
+            # 누락된 필수 컬럼 중 특정 컬럼들은 기본값으로 채우는 로직 (예시)
+            # RECEIPT_NUMBER_COL (번호)도 필요하다면 여기에 유사한 처리 추가 가능
             if INITIAL_QTY_BOX_COL in missing_cols:
                 st.info(f"'{INITIAL_QTY_BOX_COL}' 컬럼이 없어 0으로 채웁니다.")
                 df[INITIAL_QTY_BOX_COL] = 0
@@ -103,18 +107,24 @@ def load_sm_sheet_for_daily_check(_drive_service, file_id_sm, sheet_name):
                 df[INITIAL_QTY_KG_COL] = 0
                 missing_cols.remove(INITIAL_QTY_KG_COL)
             
-            if missing_cols: 
-                st.error(f"분석에 필요한 나머지 필수 컬럼({missing_cols})도 없습니다.")
+            # "번호" 컬럼이 누락된 경우, 빈 문자열로 채울지 또는 오류 처리할지 결정
+            if RECEIPT_NUMBER_COL in missing_cols:
+                st.info(f"'{RECEIPT_NUMBER_COL}' 컬럼이 없어 빈 값으로 채웁니다.")
+                df[RECEIPT_NUMBER_COL] = "" # 또는 pd.NA
+                missing_cols.remove(RECEIPT_NUMBER_COL)
+
+            if missing_cols: # 위에서 처리되지 않은 다른 필수 컬럼이 여전히 없다면
+                st.error(f"분석에 필요한 나머지 필수 컬럼({', '.join(missing_cols)})도 없습니다.")
                 st.write(f"사용 가능한 컬럼: {df.columns.tolist()}")
                 return None
             
+        df[RECEIPT_NUMBER_COL] = df.get(RECEIPT_NUMBER_COL, pd.Series(dtype='str')).fillna('').astype(str).str.strip() # "번호" 컬럼 처리
         df[PROD_CODE_COL] = df[PROD_CODE_COL].fillna('').astype(str).str.replace(r'\.0$', '', regex=True)
         df[PROD_NAME_COL] = df[PROD_NAME_COL].astype(str).str.strip()
         df[BRANCH_COL] = df[BRANCH_COL].astype(str).str.strip()
         df[EXP_DATE_COL] = df[EXP_DATE_COL].fillna('').astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
         df[RECEIPT_DATE_COL] = pd.to_datetime(df[RECEIPT_DATE_COL], errors='coerce')
         
-        # INITIAL_QTY 컬럼들이 df에 존재하도록 보장된 후 to_numeric 수행
         df[INITIAL_QTY_BOX_COL] = pd.to_numeric(df.get(INITIAL_QTY_BOX_COL, 0), errors='coerce').fillna(0)
         df[INITIAL_QTY_KG_COL] = pd.to_numeric(df.get(INITIAL_QTY_KG_COL, 0), errors='coerce').fillna(0)
         df[REMAINING_DAYS_COL] = pd.to_numeric(df[REMAINING_DAYS_COL], errors='coerce') # NaN 가능
@@ -158,16 +168,18 @@ if latest_sheet_name:
         with col1:
             st.header("⚠️ 소비기한 누락 품목")
             try:
-                # 소비기한 누락 조건 강화: 빈 문자열, 'nan', 'NaT', 'None', 실제 NaN 값 모두 포함
                 missing_exp_date_filter = df_sm_latest_raw[EXP_DATE_COL].astype(str).str.strip().isin(['', 'nan', 'NaT', 'None', 'nat']) | \
                                           pd.isna(df_sm_latest_raw[EXP_DATE_COL])
                 missing_items = df_sm_latest_raw[missing_exp_date_filter].copy()
                 st.subheader(f"미입력 ({len(missing_items)} 건)")
                 if not missing_items.empty:
-                    display_cols_missing = [PROD_CODE_COL, PROD_NAME_COL, RECEIPT_DATE_COL, BRANCH_COL]
+                    # "번호" 컬럼을 표시 목록에 추가
+                    display_cols_missing = [RECEIPT_NUMBER_COL, PROD_CODE_COL, PROD_NAME_COL, RECEIPT_DATE_COL, BRANCH_COL]
                     missing_items_display = missing_items[[col for col in display_cols_missing if col in missing_items.columns]].copy()
                     if RECEIPT_DATE_COL in missing_items_display:
                         missing_items_display[RECEIPT_DATE_COL] = pd.to_datetime(missing_items_display[RECEIPT_DATE_COL]).dt.strftime('%Y-%m-%d').fillna('')
+                    # 입고번호 컬럼명 변경하여 표시
+                    missing_items_display.rename(columns={RECEIPT_NUMBER_COL: '입고번호'}, inplace=True)
                     st.dataframe(missing_items_display, hide_index=True, use_container_width=True)
                 else: 
                     st.success("✅ 누락 품목 없음")
@@ -179,13 +191,12 @@ if latest_sheet_name:
         with col2:
             st.header("⏳ 소비기한 임박 품목")
             try:
-                # REMAINING_DAYS_COL이 없는 경우를 대비하여 .get() 사용
                 if REMAINING_DAYS_COL not in df_sm_latest_raw.columns:
                     st.warning(f"'{REMAINING_DAYS_COL}' 컬럼이 없어 소비기한 임박 품목을 확인할 수 없습니다.")
                 else:
                     df_check = df_sm_latest_raw.dropna(subset=[REMAINING_DAYS_COL]).copy()
                     df_check[REMAINING_DAYS_COL] = pd.to_numeric(df_check[REMAINING_DAYS_COL], errors='coerce')
-                    df_check.dropna(subset=[REMAINING_DAYS_COL], inplace=True) # 숫자 변환 후 NaN 다시 제거
+                    df_check.dropna(subset=[REMAINING_DAYS_COL], inplace=True) 
                     
                     if not df_check.empty:
                         df_check[REMAINING_DAYS_COL] = df_check[REMAINING_DAYS_COL].astype(int)
@@ -228,27 +239,24 @@ if latest_sheet_name:
         st.markdown("---")
         st.header("📦 장기 재고 현황 (입고 3개월 경과)")
         try:
-            # RECEIPT_DATE_COL이 없는 경우를 대비
             if RECEIPT_DATE_COL not in df_sm_latest_raw.columns:
                 st.warning(f"'{RECEIPT_DATE_COL}' 컬럼이 없어 장기 재고 현황을 확인할 수 없습니다.")
             else:
                 df_long_term_check = df_sm_latest_raw.copy()
-                # 입고일자가 NaT가 아닌 행만 필터링
                 df_long_term_check = df_long_term_check[pd.notna(df_long_term_check[RECEIPT_DATE_COL])]
 
                 if not df_long_term_check.empty:
-                    today_dt = datetime.date.today() # datetime.date 객체로 변경
+                    today_dt = datetime.date.today() 
                     three_months_ago = today_dt - relativedelta(months=3)
                     
-                    # df_long_term_check[RECEIPT_DATE_COL]도 datetime.date 객체로 변환하여 비교 (또는 Timestamp로 통일)
                     long_term_items = df_long_term_check[
-                        (df_long_term_check[RECEIPT_DATE_COL].dt.date < three_months_ago) & # .dt.date로 date 객체와 비교
+                        (df_long_term_check[RECEIPT_DATE_COL].dt.date < three_months_ago) & 
                         ((df_long_term_check[QTY_COL] > 0) | (df_long_term_check[WGT_COL] > 0))
                     ].copy()
 
                     st.subheader(f"3개월 이상 경과 재고 ({len(long_term_items)} 건)")
                     if not long_term_items.empty:
-                        display_cols_long_term = [PROD_CODE_COL, PROD_NAME_COL, BRANCH_COL, RECEIPT_DATE_COL, 
+                        display_cols_long_term = [RECEIPT_NUMBER_COL, PROD_CODE_COL, PROD_NAME_COL, BRANCH_COL, RECEIPT_DATE_COL, 
                                                   QTY_COL, WGT_COL, INITIAL_QTY_BOX_COL, INITIAL_QTY_KG_COL] 
                         
                         long_term_items_display = long_term_items[[col for col in display_cols_long_term if col in long_term_items.columns]].sort_values(by=RECEIPT_DATE_COL)
@@ -258,7 +266,8 @@ if latest_sheet_name:
                         
                         long_term_items_display.rename(columns={
                             INITIAL_QTY_BOX_COL: '입고당시(Box)',
-                            INITIAL_QTY_KG_COL: '입고당시(Kg)'
+                            INITIAL_QTY_KG_COL: '입고당시(Kg)',
+                            RECEIPT_NUMBER_COL: '입고번호' # 장기재고 표에도 입고번호 컬럼명 변경
                         }, inplace=True)
                         
                         st.dataframe(
@@ -279,7 +288,7 @@ if latest_sheet_name:
             st.error(f"오류: 장기 재고 확인 중 필요한 컬럼({ke}) 없음")
         except Exception as e_long_term:
             st.error(f"장기 재고 필터링 오류: {e_long_term}")
-            # st.error(traceback.format_exc()) # 상세 오류 필요시 주석 해제
+            # st.error(traceback.format_exc()) 
 
     else:
         st.error("SM 재고 데이터를 로드하지 못했거나 데이터가 비어있습니다. 파일 및 시트 내용을 확인해주세요.")
