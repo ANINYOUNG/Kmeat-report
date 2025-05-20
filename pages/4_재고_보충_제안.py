@@ -6,7 +6,6 @@ import datetime
 from dateutil.relativedelta import relativedelta
 import io # BytesIO 사용을 위해 필요
 import traceback # 예외 처리용
-import common_utils
 
 # common_utils.py 에서 공통 유틸리티 함수 가져오기
 # DATA_FOLDER, SM_FILE은 로컬 경로이므로 common_utils에서 가져오지 않습니다.
@@ -192,13 +191,11 @@ if drive_service is None:
     st.error("Google Drive 서비스에 연결되지 않았습니다. 앱의 메인 페이지를 방문하여 인증을 완료하거나, 앱 설정을 확인해주세요.")
     st.stop()
 
-# <<< 변경점: 필터링 조건 설명 추가 ---
 MIN_SALES_DAYS_PER_MONTH = 5 
 st.markdown(f"""
 최근 3개월간의 월평균 출고량과 현재고를 **지점별로** 비교하여 보충 필요 수량을 제안합니다.
-**단, 월평균 출고일수가 {MIN_SALES_DAYS_PER_MONTH}일 이상인 품목만 대상**으로 합니다.
+**단, 월평균 출고일수가 {MIN_SALES_DAYS_PER_MONTH}일 이상이고, 계산된 필요수량(박스)이 0보다 큰 품목만 대상**으로 합니다.
 """)
-# --- 변경점 끝 ---
 
 st.markdown(f"매출 데이터 원본: Google Drive 파일 (ID: `{SALES_FILE_ID}`)의 '{SALES_DATA_SHEET_NAME}' 시트")
 st.markdown(f"현재고 데이터 원본: Google Drive 파일 (ID: `{SM_FILE_ID}`)의 최신 날짜 시트")
@@ -213,24 +210,18 @@ if df_total_sales_3m.empty or df_current_stock.empty:
 else:
     df_avg_monthly_sales = df_total_sales_3m.copy()
     
-    # <<< 변경점: 월평균 출고량 및 월평균 출고일수 계산 ---
     df_avg_monthly_sales['월평균 출고량(박스)'] = (df_avg_monthly_sales['TotalQtyBox'] / num_months_to_analyze).round(2)
     df_avg_monthly_sales['월평균 출고량(Kg)'] = (df_avg_monthly_sales['TotalQtyKg'] / num_months_to_analyze).round(2)
-    # 'SalesDays'는 num_months_to_analyze 기간 동안의 총 출고일수이므로, 월평균 출고일수로 변환
     df_avg_monthly_sales['월평균 출고일수'] = (df_avg_monthly_sales['SalesDays'] / num_months_to_analyze).round(2)
-    # --- 변경점 끝 ---
 
-    # <<< 변경점: 월평균 출고일수 기준으로 필터링 ---
     df_avg_monthly_sales_filtered = df_avg_monthly_sales[df_avg_monthly_sales['월평균 출고일수'] >= MIN_SALES_DAYS_PER_MONTH].copy()
     
     if df_avg_monthly_sales_filtered.empty:
         st.warning(f"월평균 출고일수가 {MIN_SALES_DAYS_PER_MONTH}일 이상인 품목이 없습니다. 보고서를 생성할 수 없습니다.")
-        st.stop() # 필터링 후 데이터 없으면 중단
+        st.stop() 
     else:
         st.success(f"총 {len(df_avg_monthly_sales)}개 품목(지점별) 중 월평균 출고일수 {MIN_SALES_DAYS_PER_MONTH}일 이상인 {len(df_avg_monthly_sales_filtered)}개 품목을 대상으로 분석합니다.")
-    # --- 변경점 끝 ---
     
-    # 필터링된 데이터프레임으로 계속 진행
     df_avg_monthly_sales_to_use = df_avg_monthly_sales_filtered.rename(columns={
         SALES_PROD_CODE_COL: '상품코드', 
         SALES_PROD_NAME_COL: '상품명',
@@ -238,7 +229,6 @@ else:
     })
     df_avg_monthly_sales_to_use['상품코드'] = df_avg_monthly_sales_to_use['상품코드'].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
     df_avg_monthly_sales_to_use['지점명'] = df_avg_monthly_sales_to_use['지점명'].astype(str).str.strip()
-    # '월평균 출고일수'는 필터링 조건으로만 사용하고 최종 보고서에서는 제외할 수 있음 (필요시 포함)
     df_avg_monthly_sales_to_use = df_avg_monthly_sales_to_use[['상품코드', '상품명', '지점명', '월평균 출고량(박스)', '월평균 출고량(Kg)', '월평균 출고일수']]
 
 
@@ -257,7 +247,7 @@ else:
         df_avg_monthly_sales_to_use, 
         df_current_stock_report, 
         on=['상품코드', '지점명'], 
-        how='left', # 월평균 출고일수 기준을 통과한 품목 기준으로 재고를 붙임
+        how='left', 
         suffixes=('_sales', '_stock') 
     )
         
@@ -270,15 +260,24 @@ else:
     df_report['필요수량(박스)'] = (df_report['월평균 출고량(박스)'] - df_report['잔량(박스)']).apply(lambda x: max(0, x)).round(2)
     df_report['필요수량(Kg)'] = (df_report['월평균 출고량(Kg)'] - df_report['잔량(Kg)']).apply(lambda x: max(0, x)).round(2)
     
+    # <<< 변경점: 필요수량(박스)가 0보다 큰 품목만 필터링 ---
+    df_report_filtered_needed = df_report[df_report['필요수량(박스)'] > 0].copy()
+
+    if df_report_filtered_needed.empty:
+        st.info(f"월평균 출고일수 {MIN_SALES_DAYS_PER_MONTH}일 이상인 품목 중 현재 보충이 필요한 품목(필요수량(박스) > 0)은 없습니다.")
+        st.stop()
+    # --- 변경점 끝 ---
+
     final_report_columns = [
         '지점명', '상품코드', '상품명', 
         '잔량(박스)', '잔량(Kg)', 
         '월평균 출고량(박스)', '월평균 출고량(Kg)',
-        '월평균 출고일수', # <<< 필요시 최종 보고서에 포함 (확인용)
+        '월평균 출고일수', 
         '필요수량(박스)', '필요수량(Kg)'
     ]
-    existing_final_cols = [col for col in final_report_columns if col in df_report.columns]
-    df_report_final = df_report[existing_final_cols]
+    # 필터링된 df_report_filtered_needed 사용
+    existing_final_cols = [col for col in final_report_columns if col in df_report_filtered_needed.columns]
+    df_report_final = df_report_filtered_needed[existing_final_cols]
 
     df_report_final = df_report_final.sort_values(by=['지점명', '필요수량(박스)'], ascending=[True, False])
 
@@ -308,7 +307,7 @@ else:
         if col in df_display.columns: 
             format_dict[col] = "{:,.2f}"
     
-    if '월평균 출고일수' in df_display.columns: # 월평균 출고일수도 소수점 2자리로 포맷
+    if '월평균 출고일수' in df_display.columns: 
         format_dict['월평균 출고일수'] = "{:,.2f}"
         
     st.dataframe(df_display.style.format(format_dict, na_rep="-").set_properties(**{'text-align': 'right'}), use_container_width=True)
@@ -329,5 +328,5 @@ else:
             data=excel_data,
             file_name=f"재고보충제안보고서_지점별_{report_date_str}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="download_replenishment_report_formatted_page_filtered" # 키 변경
+            key="download_replenishment_report_formatted_page_filtered_no_zero_needed" # 키 변경
         )
