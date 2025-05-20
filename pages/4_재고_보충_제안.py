@@ -6,6 +6,7 @@ import datetime
 from dateutil.relativedelta import relativedelta
 import io # BytesIO 사용을 위해 필요
 import traceback # 예외 처리용
+import common_utils
 
 # common_utils.py 에서 공통 유틸리티 함수 가져오기
 # DATA_FOLDER, SM_FILE은 로컬 경로이므로 common_utils에서 가져오지 않습니다.
