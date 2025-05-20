@@ -1,9 +1,11 @@
 folium==0.19.4
-google_api_python_client==2.169.0
-numpy==2.2.6
+google-api-python-client==2.169.0  # 하이픈(-)으로 수정 (일반적인 패키지 이름 표기)
+numpy # "as np" 제거, 버전은 일단 삭제 (필요시 pipreqs가 찾은 2.2.6 또는 최신 호환 버전 명시)
 pandas==2.2.3
-plotly==6.0.1
-protobuf
-python_dateutil==2.9.0.post0
+plotly==6.0.1 # 로그에서는 6.1.0 이었으나, 큰 차이 없을 수 있음. 충돌 시 버전 조정 필요.
+# protobuf==6.31.0  # 주석 처리 또는 삭제 (streamlit과의 버전 충돌 때문)
+protobuf>=3.20.0,<6.0.0 # streamlit과 호환되는 버전 범위로 수정
+python-dateutil==2.9.0.post0 # 하이픈(-)으로 수정 (일반적인 패키지 이름 표기)
 streamlit==1.41.1
-streamlit_folium==0.24.0
+streamlit-folium==0.24.0 # 하이픈(-)으로 수정 (일반적인 패키지 이름 표기)
+openpyxl # 엑셀 파일 처리를 위해 필요 (이전 코드에 있었으나 pipreqs가 못 찾았다면 수동 추가)
