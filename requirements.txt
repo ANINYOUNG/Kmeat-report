@@ -9,8 +9,9 @@ python-dateutil==2.9.0.post0
 streamlit==1.41.1
 streamlit-folium==0.24.0
 openpyxl 
-google-auth: 2.29.0
-requests: 2.31.0
-urllib3: 2.2.1
+google-auth==2.29.0
+requests==2.31.0
+urllib3==2.2.1
+rich>=10.14.0,<14
 xlsxwriter # 엑셀 파일 생성을 위해 추가
 # 기타 필요한 라이브러리
