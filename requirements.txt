@@ -1,6 +1,6 @@
 
 folium==0.19.4
-google-api-python-client==2.169.0
+google-api-python-client==2.120.0
 numpy # 또는 numpy==2.2.6
 pandas==2.2.3
 plotly==6.1.0 
@@ -9,5 +9,8 @@ python-dateutil==2.9.0.post0
 streamlit==1.41.1
 streamlit-folium==0.24.0
 openpyxl 
+google-auth: 2.29.0
+requests: 2.31.0
+urllib3: 2.2.1
 xlsxwriter # 엑셀 파일 생성을 위해 추가
 # 기타 필요한 라이브러리
