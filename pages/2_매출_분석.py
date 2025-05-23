@@ -1,4 +1,4 @@
-# pages/2_매출_분석.py (검색 시 regex=False 추가 및 Cloud용 수정)
+# pages/2_매출_분석.py (검색 시 regex=False 추가 및 Cloud용 수정, 거래 감소 분석 기능 추가)
 
 import streamlit as st
 import pandas as pd
@@ -105,13 +105,10 @@ elif df_sales_loaded.empty:
 else:
     st.success(f"매출 데이터 로드 및 기본 전처리 완료: {len(df_sales_loaded)} 행")
     today = pd.Timestamp.today().normalize()
-    # 기본 분석 기간을 로드된 데이터의 최근 날짜를 기준으로 설정하도록 변경 고려 가능
-    # 여기서는 기존 로직(오늘 기준 최근 90일)을 유지하되, 데이터가 없을 경우를 대비
     
     min_data_date = df_sales_loaded[DATE_COL].min()
     max_data_date = df_sales_loaded[DATE_COL].max()
 
-    # 날짜 선택 UI 개선: 데이터가 있는 범위 내에서 선택하도록 유도
     date_range_col1, date_range_col2 = st.columns(2)
     with date_range_col1:
         start_date_input = st.date_input(
@@ -145,7 +142,7 @@ else:
     else:
         col1, col2 = st.columns([2, 3]) # 레이아웃 비율 조정
 
-        with col2: # 검색 조건 및 상세 내역
+        with col2: # 오른쪽 컬럼: 검색 조건 및 상세 내역
             st.header("🔍 조건별 매출 상세 조회")
             st.markdown("거래처명 또는 품목명(일부 또는 전체)을 입력하여 선택된 기간의 상세 매출 내역 및 관련 그래프를 조회합니다.")
             customer_input_raw = st.text_input("거래처명 검색:", key="sales_customer_input")
@@ -154,39 +151,145 @@ else:
             customer_input = customer_input_raw.strip()
             product_input = product_input_raw.strip()
 
-            df_for_display = df_filtered_global.copy() # 검색을 위해 원본 필터된 데이터 복사
+            df_for_display_search = df_filtered_global.copy() # 검색을 위해 원본 필터된 데이터 복사
             filter_active = False
             active_filters = []
 
             if customer_input:
-                df_for_display = df_for_display[df_for_display[CUSTOMER_COL].str.contains(customer_input, case=False, na=False, regex=False)]
+                df_for_display_search = df_for_display_search[df_for_display_search[CUSTOMER_COL].str.contains(customer_input, case=False, na=False, regex=False)]
                 filter_active = True
                 active_filters.append(f"거래처: '{customer_input}'")
             if product_input:
-                df_for_display = df_for_display[df_for_display[PRODUCT_COL].str.contains(product_input, case=False, na=False, regex=False)]
+                df_for_display_search = df_for_display_search[df_for_display_search[PRODUCT_COL].str.contains(product_input, case=False, na=False, regex=False)]
                 filter_active = True
                 active_filters.append(f"품목: '{product_input}'")
             
             if filter_active:
                 st.markdown("---")
                 st.subheader(f"'{' / '.join(active_filters) if active_filters else '전체'}' 상세 검색 결과")
-                st.write(f"총 {len(df_for_display)} 건의 매출 내역이 검색되었습니다.")
-                if not df_for_display.empty:
+                st.write(f"총 {len(df_for_display_search)} 건의 매출 내역이 검색되었습니다.")
+                if not df_for_display_search.empty:
                     display_cols_detail = [DATE_COL, CUSTOMER_COL, PRODUCT_COL, WEIGHT_COL, PRICE_COL, AMOUNT_COL]
-                    valid_display_cols_detail = [col for col in display_cols_detail if col in df_for_display.columns]
-                    df_display_detail = df_for_display[valid_display_cols_detail].copy()
+                    valid_display_cols_detail = [col for col in display_cols_detail if col in df_for_display_search.columns]
+                    df_display_detail = df_for_display_search[valid_display_cols_detail].copy()
                     
                     df_display_detail[DATE_COL] = df_display_detail[DATE_COL].dt.strftime('%Y-%m-%d')
                     df_display_detail.sort_values(by=DATE_COL, ascending=False, inplace=True)
                     st.dataframe(df_display_detail, hide_index=True, use_container_width=True, height=300) # 높이 지정
                 else:
                     st.info("해당 검색 조건에 맞는 상세 내역이 없습니다.")
-            elif not customer_input_raw and not product_input_raw:
+            elif not customer_input_raw and not product_input_raw: # 검색어가 둘 다 입력되지 않았을 때만 안내
                 st.info("거래처명 또는 품목명을 입력하고 Enter를 누르면 해당 조건의 상세 내역 및 그래프를 조회합니다.")
-        
-        with col1: # 그래프 표시
+            
+            # --- 추가 기능: 최근 거래 감소 거래처 분석 ---
+            st.markdown("---") 
+            st.subheader("📉 최근 거래 감소 추세 분석 (선택 기간 기준)")
+
+            if df_filtered_global.empty: # 이 분석은 전체 선택 기간(df_filtered_global)을 사용
+                st.info("거래 감소 분석을 위한 데이터가 없습니다.")
+            else:
+                period_duration_days = (end_date - start_date).days
+                
+                if period_duration_days < 1: # 최소 2일이어야 의미있는 비교 가능 (0일 또는 음수 방지)
+                                             # 1일인 경우, num_days_period1 = 0, period1_end_date = start_date
+                                             # period2_start_date = start_date + 1 day. df_period2가 비게 됨.
+                    st.info("거래 감소 추세 분석을 위해서는 최소 2일 이상의 기간이 선택되어야 합니다.")
+                else:
+                    num_days_period1 = period_duration_days // 2 
+                    period1_end_date = start_date + pd.Timedelta(days=num_days_period1)
+                    period2_start_date = period1_end_date + pd.Timedelta(days=1)
+
+                    # 기간2가 비정상적으로 설정되는 것 방지 (예: period2_start_date > end_date)
+                    if period2_start_date > end_date :
+                         df_period1 = df_filtered_global.copy() # 전체 기간을 period1로 간주
+                         df_period2 = pd.DataFrame(columns=df_filtered_global.columns) # period2는 빈 df
+                         st.caption(f"분석 기간 1: {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')} (전체 기간)")
+                         st.caption(f"분석 기간 2: 데이터 없음 (기간이 짧아 분할 불가)")
+                    else:
+                        df_period1 = df_filtered_global[df_filtered_global[DATE_COL] <= period1_end_date]
+                        df_period2 = df_filtered_global[df_filtered_global[DATE_COL] >= period2_start_date]
+                        st.caption(f"분석 기간 1 (이전): {start_date.strftime('%Y-%m-%d')} ~ {period1_end_date.strftime('%Y-%m-%d')}")
+                        st.caption(f"분석 기간 2 (최근): {period2_start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}")
+
+
+                    if df_period1.empty and df_period2.empty :
+                         st.info("선택된 기간을 나눈 각 하위 기간에 데이터가 없습니다.")
+                    # period1에만 데이터가 있거나, period2에만 데이터가 있는 경우도 고려해야 함
+                    # 여기서는 period1에 데이터가 있는 것을 기준으로 함
+                    elif df_period1.empty:
+                        st.info("분석 기간 1 (이전 기간)에 매출 데이터가 없어 비교할 수 없습니다.")
+                    else:
+                        sales_p1 = df_period1.groupby(CUSTOMER_COL)[AMOUNT_COL].sum().reset_index()
+                        sales_p1.columns = [CUSTOMER_COL, '기간1_매출액']
+                        
+                        if df_period2.empty: # 기간2에 데이터가 아예 없는 경우
+                            sales_p2 = pd.DataFrame(columns=[CUSTOMER_COL, '기간2_매출액'])
+                        else:
+                            sales_p2 = df_period2.groupby(CUSTOMER_COL)[AMOUNT_COL].sum().reset_index()
+                            sales_p2.columns = [CUSTOMER_COL, '기간2_매출액']
+
+                        merged_sales = pd.merge(sales_p1, sales_p2, on=CUSTOMER_COL, how='left').fillna(0)
+                        merged_sales = merged_sales[merged_sales['기간1_매출액'] > 0] # 이전 기간에 매출이 있었던 거래처
+
+                        if merged_sales.empty:
+                            st.info("이전 기간에 매출이 발생한 거래처가 없거나, 비교할 데이터가 없습니다.")
+                        else:
+                            merged_sales['매출변동액'] = merged_sales['기간2_매출액'] - merged_sales['기간1_매출액']
+                            # 매출변동률 계산 (기간1_매출액이 0인 경우 방지 - 이미 위에서 필터링)
+                            merged_sales['매출변동률(%)'] = ((merged_sales['매출변동액'] / merged_sales['기간1_매출액']) * 100).round(2)
+                            
+                            decreased_customers = merged_sales[merged_sales['매출변동액'] < 0].copy()
+                            decreased_customers_sorted = decreased_customers.sort_values(by='매출변동액', ascending=True)
+
+                            if decreased_customers_sorted.empty:
+                                st.info("선택된 기간 동안 매출이 감소한 거래처가 없습니다 (이전 기간에 거래가 있었던 거래처 기준).")
+                            else:
+                                st.write(f"총 {len(decreased_customers_sorted)} 곳의 거래처에서 최근 거래가 감소했습니다.")
+                                
+                                decreased_customers_display = decreased_customers_sorted[[
+                                    CUSTOMER_COL, '기간1_매출액', '기간2_매출액', '매출변동액', '매출변동률(%)'
+                                ]].rename(columns={
+                                    CUSTOMER_COL: '거래처명',
+                                    '기간1_매출액': '이전 기간 매출액',
+                                    '기간2_매출액': '최근 기간 매출액',
+                                    '매출변동액': '매출 변동액',
+                                    '매출변동률(%)': '매출 변동률 (%)'
+                                })
+                                
+                                # 숫자 포맷팅 (예시)
+                                formatters = {
+                                    '이전 기간 매출액': '{:,.0f}',
+                                    '최근 기간 매출액': '{:,.0f}',
+                                    '매출 변동액': '{:,.0f}',
+                                    '매출 변동률 (%)': '{:.2f}%'
+                                }
+                                st.dataframe(
+                                    decreased_customers_display.style.format(formatters),
+                                    hide_index=True, 
+                                    use_container_width=True
+                                )
+                                
+                                if not decreased_customers_display.empty:
+                                    st.write("---")
+                                    st.write("**매출 감소액 Top 5 거래처**")
+                                    top_n_decreased = decreased_customers_display.nsmallest(5, '매출 변동액')
+                                    
+                                    if not top_n_decreased.empty:
+                                        chart_data = top_n_decreased.set_index('거래처명')[['매출 변동액']]
+                                        st.bar_chart(chart_data)
+                                    else:
+                                        st.info("매출 감소액 Top 5를 표시할 데이터가 충분하지 않습니다.")
+        # --- col2 끝 ---
+
+        with col1: # 왼쪽 컬럼: 그래프 표시
             graph_title_suffix = ""
-            if filter_active:
+            # 그래프를 그릴 때 사용할 데이터프레임: 검색 필터가 적용된 df_for_display_search 또는 전체 df_filtered_global
+            # 현재는 검색 조건이 입력되었을 때만 df_for_display_search를 사용하고, 아니면 df_filtered_global을 사용하도록 되어야 함
+            # 이 부분을 명확히 하기 위해, 그래프용 데이터프레임을 명시적으로 결정
+            
+            df_for_graph = df_filtered_global # 기본은 전체 기간 데이터
+            if filter_active: # 검색어가 하나라도 입력되었다면
+                df_for_graph = df_for_display_search # 검색 결과 데이터 사용
                 graph_title_suffix = f" ({', '.join(active_filters)})"
             
             st.header(f"📊 일별 매출 추이{graph_title_suffix}")
@@ -195,36 +298,35 @@ else:
             else:
                 st.markdown(f"검색 조건에 따른 선택된 기간의 일별 매출 금액과 판매 중량(Kg) 추세입니다.")
 
-            if df_for_display.empty:
+            if df_for_graph.empty: # 그래프용 데이터가 비었는지 확인
                 st.warning("선택된 조건에 해당하는 매출 데이터가 없어 그래프를 표시할 수 없습니다.")
             else:
-                daily_summary = df_for_display.groupby(pd.Grouper(key=DATE_COL, freq='D'))[[AMOUNT_COL, WEIGHT_COL]].sum()
-                # 그래프 표시 전, 합계가 0인 날짜는 제외 (선택 사항)
+                daily_summary = df_for_graph.groupby(pd.Grouper(key=DATE_COL, freq='D'))[[AMOUNT_COL, WEIGHT_COL]].sum()
                 daily_summary_for_chart = daily_summary[~((daily_summary[AMOUNT_COL] == 0) & (daily_summary[WEIGHT_COL] == 0))]
                 
                 if daily_summary_for_chart.empty:
                     st.write("그래프에 표시할 데이터가 없습니다 (모든 날짜의 합계가 0이거나 데이터 없음).")
                 else:
-                    daily_summary_for_chart = daily_summary_for_chart.copy() # SettingWithCopyWarning 방지
-                    # 컬럼 이름 변경 시, 원본 WEIGHT_COL 상수 값을 포함하여 명확히 함
+                    daily_summary_for_chart = daily_summary_for_chart.copy() 
                     daily_summary_for_chart.rename(columns={AMOUNT_COL: '매출 금액(원)', WEIGHT_COL: f'판매 중량({WEIGHT_COL})'}, inplace=True)
 
                     st.subheader("금액 (원)")
                     st.line_chart(daily_summary_for_chart[['매출 금액(원)']], use_container_width=True)
 
-                    st.subheader(f"중량 ({WEIGHT_COL})") # WEIGHT_COL 상수 사용
+                    st.subheader(f"중량 ({WEIGHT_COL})") 
                     st.line_chart(daily_summary_for_chart[[f'판매 중량({WEIGHT_COL})']], use_container_width=True)
 
-                with st.expander("선택 조건 일별 요약 데이터 보기"):
-                    # 검색 조건이 적용된 df_for_display를 사용
-                    daily_summary_table_data = df_for_display.groupby(pd.Grouper(key=DATE_COL, freq='D'))[[AMOUNT_COL, WEIGHT_COL]].sum().reset_index()
-                    if daily_summary_table_data.empty:
-                        st.write("요약할 데이터가 없습니다.")
-                    else:
-                        weekday_map = {0: '월', 1: '화', 2: '수', 3: '목', 4: '금', 5: '토', 6: '일'}
-                        daily_summary_table_data['요일'] = daily_summary_table_data[DATE_COL].dt.dayofweek.map(weekday_map)
-                        daily_summary_table_data[DATE_COL] = daily_summary_table_data[DATE_COL].dt.strftime('%Y-%m-%d')
-                        daily_summary_table_data.rename(columns={AMOUNT_COL: '매출 금액(원)', WEIGHT_COL: f'판매 중량({WEIGHT_COL})'}, inplace=True)
-                        
-                        display_columns = [DATE_COL, '요일', '매출 금액(원)', f'판매 중량({WEIGHT_COL})']
-                        st.dataframe(daily_summary_table_data[display_columns], use_container_width=True, hide_index=True)
+                    with st.expander("선택 조건 일별 요약 데이터 보기"):
+                        daily_summary_table_data = df_for_graph.groupby(pd.Grouper(key=DATE_COL, freq='D'))[[AMOUNT_COL, WEIGHT_COL]].sum().reset_index()
+                        if daily_summary_table_data.empty:
+                            st.write("요약할 데이터가 없습니다.")
+                        else:
+                            weekday_map = {0: '월', 1: '화', 2: '수', 3: '목', 4: '금', 5: '토', 6: '일'}
+                            daily_summary_table_data['요일'] = daily_summary_table_data[DATE_COL].dt.dayofweek.map(weekday_map)
+                            daily_summary_table_data[DATE_COL] = daily_summary_table_data[DATE_COL].dt.strftime('%Y-%m-%d')
+                            daily_summary_table_data.rename(columns={AMOUNT_COL: '매출 금액(원)', WEIGHT_COL: f'판매 중량({WEIGHT_COL})'}, inplace=True)
+                            
+                            display_columns = [DATE_COL, '요일', '매출 금액(원)', f'판매 중량({WEIGHT_COL})']
+                            st.dataframe(daily_summary_table_data[display_columns], use_container_width=True, hide_index=True)
+        # --- col1 끝 ---
+# --- else (df_sales_loaded is not None and not df_sales_loaded.empty) 끝 ---
