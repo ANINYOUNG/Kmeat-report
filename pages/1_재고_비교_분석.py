@@ -26,7 +26,7 @@ SM_FILE_ID = "1tRljdvOpp4fITaVEXvoL9mNveNg2qt4p"
 LOCATION_MAP = {
     "냉동": "신갈냉동",
     "상이품/작업": "신갈상이품/작업",
-    "선왕판매": "케이미트스토어"
+    "선왕판매": "배정분"  # "케이미트스토어"를 "배정분"으로 수정
 }
 ERP_TARGET_LOCATIONS = list(LOCATION_MAP.keys())
 SM_TARGET_LOCATIONS = list(LOCATION_MAP.values())
@@ -364,4 +364,3 @@ if selected_date_obj:
                         st.dataframe(df_mismatches_display[[col for col in display_cols_mismatch if col in df_mismatches_display.columns]], use_container_width=True)
 else:
     st.info("분석할 날짜를 선택해주세요.")
-
