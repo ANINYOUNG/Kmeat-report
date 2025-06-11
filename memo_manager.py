@@ -113,7 +113,8 @@ def render_sticky_notes(memo_file_id):
         key="sticky_notes_component" 
     )
 
-    if updated_memos and st.session_state.memos != updated_memos:
+    # 컴포넌트로부터 받은 데이터가 유효한 리스트 형식일 때만 상태를 업데이트합니다. (핵심 오류 수정)
+    if updated_memos and isinstance(updated_memos, list) and st.session_state.memos != updated_memos:
         st.session_state.memos = updated_memos
         save_memos_to_drive(current_drive_service, memo_file_id, st.session_state.memos)
         st.rerun() # 외부 컴포넌트에서 값이 변경되었을 때만 재실행
