@@ -23,8 +23,8 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
 # --- 4. 외부 모듈 임포트 ---
-# memo_manager.py 파일에서 sticky notes 렌더링 함수를 가져옵니다.
-from memo_manager import render_sticky_notes
+# memo_manager.py 파일에서 필요한 함수들을 가져옵니다.
+from memo_manager import initialize_memo_sidebar, render_sticky_notes
 
 # --- 한국어 요일 리스트 ---
 KOREAN_DAYS = ['월', '화', '수', '목', '금', '토', '일']
@@ -68,9 +68,8 @@ if SERVICE_ACCOUNT_LOADED and drive_service is not None:
     if 'drive_service' not in st.session_state:
         st.session_state['drive_service'] = drive_service
 elif not SERVICE_ACCOUNT_LOADED or drive_service is None:
-    st.error("Drive service 초기화 실패 또는 인증 정보 없음!")
-    if 'drive_service' in st.session_state:
-        del st.session_state['drive_service']
+    # 이 부분은 페이지 로딩 시 한번만 체크되도록 main 블록으로 이동
+    pass
 
 # --- Google Drive 파일 ID 정의 ---
 SM_FILE_ID = "1tRljdvOpp4fITaVEXvoL9mNveNg2qt4p"
@@ -262,10 +261,11 @@ def load_log_data_for_period_from_excel_drive(current_drive_service, file_id, sh
         return pd.DataFrame()
 
 # --- 페이지 렌더링 함수 정의 ---
-def render_daily_trend_page_layout():
+def render_main_page_content():
+    """메인 페이지의 데이터 분석 콘텐츠를 렌더링합니다."""
     current_drive_service = st.session_state.get('drive_service')
     if not current_drive_service:
-        st.error("Google Drive 서비스에 연결되지 않았습니다. 앱 설정을 확인하거나 잠시 후 다시 시도해주세요.")
+        st.error("Google Drive 서비스에 연결되지 않았습니다.")
         st.stop()
 
     now_time = datetime.datetime.now()
@@ -273,7 +273,6 @@ def render_daily_trend_page_layout():
     st.markdown(f"<h1 style='text-align: center; margin-bottom: 0.1rem;'>📊 데이터 분석 대시보드 (메인)</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; margin-top: 0.1rem; font-size: 0.9em;'>현재 시간: {current_time_str}</p>", unsafe_allow_html=True)
     
-    # --- 데이터 분석 파트 ---
     st.markdown("---", unsafe_allow_html=True)
     st.header("📈 재고 및 물류 현황")
 
@@ -554,12 +553,20 @@ def render_daily_trend_page_layout():
 
 
 # --- 앱 실행 부분 ---
-if __name__ == "__main__":
-    current_drive_service_on_load = st.session_state.get('drive_service')
-    
-    if current_drive_service_on_load is not None:
-        render_daily_trend_page_layout()
-    else:
-        st.error("Google Drive 인증 정보를 로드하지 못했습니다. 앱 설정을 확인하거나 앱을 재시작해주세요.")
-        if not IS_CLOUD_ENVIRONMENT:
-            st.info(f"로컬 실행 중이라면, 코드 내의 SERVICE_ACCOUNT_FILE_PATH ('{SERVICE_ACCOUNT_FILE_PATH}')가 올바른지 확인해주세요.")
+# 이 블록은 모든 페이지에서 공통적으로 실행됩니다.
+if 'drive_service' in st.session_state:
+    # 모든 페이지의 사이드바에 메모 추가 버튼을 표시합니다.
+    initialize_memo_sidebar(MEMO_FILE_ID)
+else:
+    # 아직 인증되지 않았으면 사이드바에 아무것도 표시하지 않음
+    pass
+
+# --- 메인 페이지 콘텐츠 실행 ---
+# 이 블록은 inventory_app.py가 직접 실행될 때만 작동합니다.
+if st.session_state.get('drive_service'):
+    render_main_page_content()
+else:
+    st.error("Google Drive 인증 정보를 로드하지 못했습니다. 앱 설정을 확인하거나 앱을 재시작해주세요.")
+    if not IS_CLOUD_ENVIRONMENT:
+        st.info(f"로컬 실행 중이라면, 코드 내의 SERVICE_ACCOUNT_FILE_PATH ('{SERVICE_ACCOUNT_FILE_PATH}')가 올바른지 확인해주세요.")
+
