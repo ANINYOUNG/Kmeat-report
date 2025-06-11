@@ -24,7 +24,7 @@ from googleapiclient.http import MediaIoBaseDownload
 
 # --- 4. 외부 모듈 임포트 ---
 # memo_manager.py 파일에서 필요한 함수들을 가져옵니다.
-from memo_manager import initialize_memo_sidebar, render_sticky_notes
+from memo_manager import ensure_memos_loaded, initialize_memo_sidebar, render_sticky_notes
 
 # --- 한국어 요일 리스트 ---
 KOREAN_DAYS = ['월', '화', '수', '목', '금', '토', '일']
@@ -32,44 +32,36 @@ KOREAN_DAYS = ['월', '화', '수', '목', '금', '토', '일']
 # --- Google API 인증 및 Drive 서비스 클라이언트 생성 ---
 # 메모 쓰기 기능을 위해 'drive' 전체 권한 사용
 DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive']
-drive_service = None
-SERVICE_ACCOUNT_LOADED = False
 
-IS_CLOUD_ENVIRONMENT = "google_creds_json" in st.secrets
-
-if IS_CLOUD_ENVIRONMENT:
-    try:
-        creds_json_str = st.secrets["google_creds_json"]
-        creds_dict = json.loads(creds_json_str)
-        creds = Credentials.from_service_account_info(creds_dict, scopes=DRIVE_SCOPES)
-        drive_service = build('drive', 'v3', credentials=creds)
-        SERVICE_ACCOUNT_LOADED = True
-    except Exception as e_secrets:
-        st.error(f"클라우드 Secrets 인증 중 오류: {e_secrets}")
-        drive_service = None
-        SERVICE_ACCOUNT_LOADED = False
-else:
-    SERVICE_ACCOUNT_FILE_PATH = "YOUR_LOCAL_SERVICE_ACCOUNT_FILE_PATH.json" # 실제 로컬 경로로 수정 필요
-    if os.path.exists(SERVICE_ACCOUNT_FILE_PATH):
+@st.cache_resource
+def get_drive_service():
+    """Google Drive 서비스 객체를 생성하고 캐시에 저장합니다."""
+    # 클라우드 환경에서 실행될 때
+    if "google_creds_json" in st.secrets:
         try:
-            creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE_PATH, scopes=DRIVE_SCOPES)
-            drive_service = build('drive', 'v3', credentials=creds)
-            SERVICE_ACCOUNT_LOADED = True
-        except Exception as e_local:
-            st.error(f"로컬 키 파일 인증 중 오류: {e_local}")
-            drive_service = None
-            SERVICE_ACCOUNT_LOADED = False
+            creds_json_str = st.secrets["google_creds_json"]
+            creds_dict = json.loads(creds_json_str)
+            creds = Credentials.from_service_account_info(creds_dict, scopes=DRIVE_SCOPES)
+            return build('drive', 'v3', credentials=creds)
+        except Exception as e:
+            st.error(f"클라우드 Secrets 인증 중 오류: {e}")
+            return None
+    # 로컬 환경에서 실행될 때
     else:
-        st.warning(f"로컬: 서비스 계정 키 파일 없음: {SERVICE_ACCOUNT_FILE_PATH}")
-        drive_service = None
-        SERVICE_ACCOUNT_LOADED = False
-
-if SERVICE_ACCOUNT_LOADED and drive_service is not None:
-    if 'drive_service' not in st.session_state:
-        st.session_state['drive_service'] = drive_service
-elif not SERVICE_ACCOUNT_LOADED or drive_service is None:
-    # 이 부분은 페이지 로딩 시 한번만 체크되도록 main 블록으로 이동
-    pass
+        # 이 파일 경로는 실제 로컬 경로로 수정해야 합니다.
+        SERVICE_ACCOUNT_FILE_PATH = "your_service_account.json" 
+        if os.path.exists(SERVICE_ACCOUNT_FILE_PATH):
+            try:
+                creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE_PATH, scopes=DRIVE_SCOPES)
+                return build('drive', 'v3', credentials=creds)
+            except Exception as e:
+                st.error(f"로컬 키 파일 인증 중 오류: {e}")
+                return None
+        else:
+            # 로컬 개발 시, 이 파일이 없으면 경고 메시지를 표시합니다.
+            # 클라우드 배포 시에는 secrets를 사용하므로 이 부분은 무시됩니다.
+            pass # st.warning(f"로컬: 서비스 계정 키 파일 없음: {SERVICE_ACCOUNT_FILE_PATH}")
+            return None
 
 # --- Google Drive 파일 ID 정의 ---
 SM_FILE_ID = "1tRljdvOpp4fITaVEXvoL9mNveNg2qt4p"
@@ -263,11 +255,8 @@ def load_log_data_for_period_from_excel_drive(current_drive_service, file_id, sh
 # --- 페이지 렌더링 함수 정의 ---
 def render_main_page_content():
     """메인 페이지의 데이터 분석 콘텐츠를 렌더링합니다."""
-    current_drive_service = st.session_state.get('drive_service')
-    if not current_drive_service:
-        st.error("Google Drive 서비스에 연결되지 않았습니다.")
-        st.stop()
-
+    current_drive_service = st.session_state.drive_service
+    
     now_time = datetime.datetime.now()
     current_time_str = now_time.strftime("%Y-%m-%d %H:%M:%S")
     st.markdown(f"<h1 style='text-align: center; margin-bottom: 0.1rem;'>📊 데이터 분석 대시보드 (메인)</h1>", unsafe_allow_html=True)
@@ -553,20 +542,22 @@ def render_main_page_content():
 
 
 # --- 앱 실행 부분 ---
-# 이 블록은 모든 페이지에서 공통적으로 실행됩니다.
-if 'drive_service' in st.session_state:
-    # 모든 페이지의 사이드바에 메모 추가 버튼을 표시합니다.
-    initialize_memo_sidebar(MEMO_FILE_ID)
-else:
-    # 아직 인증되지 않았으면 사이드바에 아무것도 표시하지 않음
-    pass
+def main():
+    # 1. 앱이 시작될 때 최우선으로 Drive 서비스 객체를 가져와 세션에 저장합니다.
+    if 'drive_service' not in st.session_state:
+        st.session_state.drive_service = get_drive_service()
 
-# --- 메인 페이지 콘텐츠 실행 ---
-# 이 블록은 inventory_app.py가 직접 실행될 때만 작동합니다.
-if st.session_state.get('drive_service'):
-    render_main_page_content()
-else:
-    st.error("Google Drive 인증 정보를 로드하지 못했습니다. 앱 설정을 확인하거나 앱을 재시작해주세요.")
-    if not IS_CLOUD_ENVIRONMENT:
-        st.info(f"로컬 실행 중이라면, 코드 내의 SERVICE_ACCOUNT_FILE_PATH ('{SERVICE_ACCOUNT_FILE_PATH}')가 올바른지 확인해주세요.")
+    # 2. Drive 서비스가 성공적으로 로드된 경우에만 나머지 UI를 렌더링합니다.
+    if st.session_state.drive_service:
+        # 모든 페이지에서 공통으로 사용할 메모 데이터와 사이드바 버튼을 초기화합니다.
+        ensure_memos_loaded(st.session_state.drive_service, MEMO_FILE_ID)
+        initialize_memo_sidebar(MEMO_FILE_ID)
 
+        # 현재 페이지의 메인 콘텐츠를 렌더링합니다.
+        # (향후 멀티페이지 앱으로 확장 시, 이 부분을 페이지별로 다르게 구성할 수 있습니다.)
+        render_main_page_content()
+    else:
+        st.error("Google Drive 인증 정보를 로드하지 못했습니다. 앱 설정을 확인하거나 앱을 재시작해주세요.")
+
+if __name__ == "__main__":
+    main()
