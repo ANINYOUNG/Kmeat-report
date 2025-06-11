@@ -1,4 +1,4 @@
-# inventory_app.py (메인 UI 및 메모 기능 추가)
+# inventory_app.py (메인 UI 및 메모 보드 적용)
 
 import streamlit as st
 
@@ -20,13 +20,16 @@ import uuid
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+from googleapiclient.http import MediaIoBaseDownload
+
+# --- 4. 외부 모듈 임포트 ---
+# memo_manager.py 파일에서 메모 보드 렌더링 함수를 가져옵니다.
+from memo_manager import render_memo_board
 
 # --- 한국어 요일 리스트 ---
 KOREAN_DAYS = ['월', '화', '수', '목', '금', '토', '일']
 
 # --- Google API 인증 및 Drive 서비스 클라이언트 생성 ---
-# 중요: 메모 쓰기 기능을 위해 scopes를 'drive.readonly'에서 'drive'로 변경해야 합니다.
 DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive']
 drive_service = None
 SERVICE_ACCOUNT_LOADED = False
@@ -41,7 +44,7 @@ if IS_CLOUD_ENVIRONMENT:
         drive_service = build('drive', 'v3', credentials=creds)
         SERVICE_ACCOUNT_LOADED = True
     except Exception as e_secrets:
-        st.sidebar.error(f"클라우드 Secrets 인증 중 오류: {e_secrets}")
+        st.error(f"클라우드 Secrets 인증 중 오류: {e_secrets}")
         drive_service = None
         SERVICE_ACCOUNT_LOADED = False
 else:
@@ -52,20 +55,19 @@ else:
             drive_service = build('drive', 'v3', credentials=creds)
             SERVICE_ACCOUNT_LOADED = True
         except Exception as e_local:
-            st.sidebar.error(f"로컬 키 파일 인증 중 오류: {e_local}")
+            st.error(f"로컬 키 파일 인증 중 오류: {e_local}")
             drive_service = None
             SERVICE_ACCOUNT_LOADED = False
     else:
-        st.sidebar.warning(f"로컬: 서비스 계정 키 파일 없음: {SERVICE_ACCOUNT_FILE_PATH}")
+        st.warning(f"로컬: 서비스 계정 키 파일 없음: {SERVICE_ACCOUNT_FILE_PATH}")
         drive_service = None
         SERVICE_ACCOUNT_LOADED = False
 
 if SERVICE_ACCOUNT_LOADED and drive_service is not None:
-    if 'drive_service' not in st.session_state or st.session_state.get('drive_service') is None:
+    if 'drive_service' not in st.session_state:
         st.session_state['drive_service'] = drive_service
-        # st.sidebar.success("Drive service가 성공적으로 로드됨!") # 메시지는 한번만 표시되도록 조절
 elif not SERVICE_ACCOUNT_LOADED or drive_service is None:
-    st.sidebar.error("Drive service 초기화 실패 또는 인증 정보 없음!")
+    st.error("Drive service 초기화 실패 또는 인증 정보 없음!")
     if 'drive_service' in st.session_state:
         del st.session_state['drive_service']
 
@@ -73,7 +75,6 @@ elif not SERVICE_ACCOUNT_LOADED or drive_service is None:
 SM_FILE_ID = "1tRljdvOpp4fITaVEXvoL9mNveNg2qt4p"
 PURCHASE_FILE_ID = "1AgKl29yQ80sTDszLql6oBnd9FnLWf8oR"
 SALES_FILE_ID = "1h-V7kIoInXgGLll7YBW5V_uZdF3Q1PdY"
-# ⚠️ 중요: 아래에 생성하신 memos.json 파일의 ID를 입력해주세요.
 MEMO_FILE_ID = "1ZQk9SqudpujLmoP7SXW89DXBZyXpLuQI" 
 
 # --- 데이터 처리용 상수 ---
@@ -92,7 +93,7 @@ SALES_LOG_SHEET_NAME = 's-list'
 SUMMARY_TABLE_LOCATIONS = ['신갈냉동', '선왕CH4층', '신갈김형제', '신갈상이품/작업', '케이미트스토어']
 
 
-# --- Google Drive 파일 다운로드/업로드 헬퍼 함수 ---
+# --- 데이터 로딩 함수 (이전과 동일) ---
 @st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
 def download_excel_from_drive_as_bytes(current_drive_service, file_id, file_name_for_error_msg="Excel file"):
     if current_drive_service is None:
@@ -114,115 +115,6 @@ def download_excel_from_drive_as_bytes(current_drive_service, file_id, file_name
         st.error(f"오류: '{file_name_for_error_msg}' (ID: {file_id}) 파일 처리 중 예외 발생: {e}")
         return None
 
-
-# --- 메모 기능 관련 함수 ---
-def load_memos_from_drive(current_drive_service, file_id):
-    """Google Drive에서 메모 파일을 읽어옵니다."""
-    if file_id == "YOUR_MEMOS_JSON_FILE_ID_HERE":
-        st.sidebar.warning("메모 파일 ID를 설정해주세요.")
-        return []
-    try:
-        request = current_drive_service.files().get_media(fileId=file_id)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-        fh.seek(0)
-        content = fh.getvalue().decode('utf-8')
-        if not content:
-            return []
-        return json.loads(content)
-    except HttpError as error:
-        if error.resp.status == 404:
-            st.sidebar.warning("memos.json 파일을 찾을 수 없습니다. 새로 생성합니다.")
-            return []
-        st.sidebar.error(f"메모 로딩 실패: {error}")
-        return []
-    except Exception as e:
-        st.sidebar.error(f"메모 로딩 중 예외 발생: {e}")
-        return []
-
-def save_memos_to_drive(current_drive_service, file_id, memos_data):
-    """메모 데이터를 Google Drive에 저장합니다."""
-    if file_id == "YOUR_MEMOS_JSON_FILE_ID_HERE":
-        return
-    try:
-        memos_json_str = json.dumps(memos_data, indent=4, ensure_ascii=False)
-        fh = io.BytesIO(memos_json_str.encode('utf-8'))
-        media = MediaIoBaseUpload(fh, mimetype='application/json', resumable=True)
-        current_drive_service.files().update(
-            fileId=file_id,
-            media_body=media
-        ).execute()
-    except Exception as e:
-        st.sidebar.error(f"메모 저장 실패: {e}")
-
-def render_memo_ui():
-    """사이드바에 메모 UI를 렌더링합니다."""
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("📝 메모장")
-    
-    current_drive_service = st.session_state.get('drive_service')
-    if not current_drive_service:
-        st.sidebar.warning("Drive 서비스가 연결되지 않아 메모 기능을 사용할 수 없습니다.")
-        return
-
-    if 'memos' not in st.session_state:
-        st.session_state.memos = load_memos_from_drive(current_drive_service, MEMO_FILE_ID)
-    if 'editing_memo_id' not in st.session_state:
-        st.session_state.editing_memo_id = None
-
-    with st.sidebar.expander("새 메모 추가", expanded=False):
-        new_memo_content = st.text_area("내용:", key="new_memo_text")
-        if st.button("메모 추가"):
-            if new_memo_content:
-                now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                new_memo = {
-                    "id": str(uuid.uuid4()),
-                    "content": new_memo_content,
-                    "timestamp": now
-                }
-                st.session_state.memos.insert(0, new_memo)
-                save_memos_to_drive(current_drive_service, MEMO_FILE_ID, st.session_state.memos)
-                st.session_state.new_memo_text = ""
-                st.rerun()
-
-    if not st.session_state.memos:
-        st.sidebar.info("작성된 메모가 없습니다.")
-    else:
-        for memo in st.session_state.memos:
-            memo_id = memo['id']
-            with st.sidebar.container(border=True):
-                if st.session_state.editing_memo_id == memo_id:
-                    edited_content = st.text_area(
-                        "메모 수정", 
-                        value=memo['content'], 
-                        key=f"edit_text_{memo_id}"
-                    )
-                    col1, col2 = st.columns(2)
-                    if col1.button("저장", key=f"save_{memo_id}"):
-                        memo['content'] = edited_content
-                        st.session_state.editing_memo_id = None
-                        save_memos_to_drive(current_drive_service, MEMO_FILE_ID, st.session_state.memos)
-                        st.rerun()
-                    if col2.button("취소", key=f"cancel_{memo_id}"):
-                        st.session_state.editing_memo_id = None
-                        st.rerun()
-                else:
-                    st.markdown(memo['content'])
-                    st.caption(f"작성: {memo['timestamp']}")
-                    col1, col2 = st.columns([1, 1])
-                    if col1.button("수정", key=f"edit_{memo_id}"):
-                        st.session_state.editing_memo_id = memo_id
-                        st.rerun()
-                    if col2.button("삭제", key=f"delete_{memo_id}"):
-                        st.session_state.memos = [m for m in st.session_state.memos if m['id'] != memo_id]
-                        save_memos_to_drive(current_drive_service, MEMO_FILE_ID, st.session_state.memos)
-                        st.rerun()
-
-
-# --- 데이터 로딩 함수 (이전과 동일) ---
 @st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
 def get_all_available_sheet_dates_from_excel_drive(current_drive_service, file_id, file_name_for_error_msg="SM재고현황.xlsx"):
     fh = download_excel_from_drive_as_bytes(current_drive_service, file_id, file_name_for_error_msg)
@@ -379,6 +271,11 @@ def render_daily_trend_page_layout():
     current_time_str = now_time.strftime("%Y-%m-%d %H:%M:%S")
     st.markdown(f"<h1 style='text-align: center; margin-bottom: 0.1rem;'>📊 데이터 분석 대시보드 (메인)</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; margin-top: 0.1rem; font-size: 0.9em;'>현재 시간: {current_time_str}</p>", unsafe_allow_html=True)
+    
+    # --- 메모 보드 렌더링 ---
+    # 이제부터 모든 페이지에 이 함수 호출을 추가하면 됩니다.
+    render_memo_board(MEMO_FILE_ID)
+
     st.markdown("---", unsafe_allow_html=True)
 
     all_available_dates_desc = get_all_available_sheet_dates_from_excel_drive(current_drive_service, SM_FILE_ID, "SM재고현황.xlsx")
@@ -657,8 +554,6 @@ def render_daily_trend_page_layout():
 if __name__ == "__main__":
     current_drive_service_on_load = st.session_state.get('drive_service')
     
-    render_memo_ui()
-
     if current_drive_service_on_load is not None:
         render_daily_trend_page_layout()
     else:
