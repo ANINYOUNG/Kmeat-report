@@ -1,4 +1,4 @@
-# inventory_app.py (메인 UI 및 메모 보드 적용)
+# inventory_app.py (Sticky Notes Component 적용)
 
 import streamlit as st
 
@@ -23,13 +23,14 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
 # --- 4. 외부 모듈 임포트 ---
-# memo_manager.py 파일에서 메모 보드 렌더링 함수를 가져옵니다.
-from memo_manager import render_memo_board
+# memo_manager.py 파일에서 sticky notes 렌더링 함수를 가져옵니다.
+from memo_manager import render_sticky_notes
 
 # --- 한국어 요일 리스트 ---
 KOREAN_DAYS = ['월', '화', '수', '목', '금', '토', '일']
 
 # --- Google API 인증 및 Drive 서비스 클라이언트 생성 ---
+# 메모 쓰기 기능을 위해 'drive' 전체 권한 사용
 DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive']
 drive_service = None
 SERVICE_ACCOUNT_LOADED = False
@@ -77,7 +78,7 @@ PURCHASE_FILE_ID = "1AgKl29yQ80sTDszLql6oBnd9FnLWf8oR"
 SALES_FILE_ID = "1h-V7kIoInXgGLll7YBW5V_uZdF3Q1PdY"
 MEMO_FILE_ID = "1ZQk9SqudpujLmoP7SXW89DXBZyXpLuQI" 
 
-# --- 데이터 처리용 상수 ---
+# --- 데이터 처리용 상수 (이전과 동일) ---
 SM_QTY_COL_TREND = '잔량(박스)'
 SM_WGT_COL_TREND = '잔량(Kg)'
 REPORT_LOCATION_MAP_TREND = {'신갈냉동': '신갈', '선왕CH4층': '선왕', '신갈김형제': '김형제', '신갈상이품/작업': '상이품', '케이미트스토어': '스토어'}
@@ -272,11 +273,9 @@ def render_daily_trend_page_layout():
     st.markdown(f"<h1 style='text-align: center; margin-bottom: 0.1rem;'>📊 데이터 분석 대시보드 (메인)</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; margin-top: 0.1rem; font-size: 0.9em;'>현재 시간: {current_time_str}</p>", unsafe_allow_html=True)
     
-    # --- 메모 보드 렌더링 ---
-    # 이제부터 모든 페이지에 이 함수 호출을 추가하면 됩니다.
-    render_memo_board(MEMO_FILE_ID)
-
+    # --- 데이터 분석 파트 ---
     st.markdown("---", unsafe_allow_html=True)
+    st.header("📈 재고 및 물류 현황")
 
     all_available_dates_desc = get_all_available_sheet_dates_from_excel_drive(current_drive_service, SM_FILE_ID, "SM재고현황.xlsx")
     dates_for_report = []
@@ -548,6 +547,10 @@ def render_daily_trend_page_layout():
     with comparison_cols[1]:
         df_sales_compare = prepare_comparison_df(df_sales_cy, df_sales_py, "출고")
         plot_comparison_chart(df_sales_compare, "월별 출고 중량 비교")
+
+    # --- 스티커 메모 렌더링 ---
+    # 데이터 분석 차트 아래에 메모 기능을 추가합니다.
+    render_sticky_notes(MEMO_FILE_ID)
 
 
 # --- 앱 실행 부분 ---
