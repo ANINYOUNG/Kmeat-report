@@ -1,4 +1,4 @@
-# inventory_app.py (메인 페이지 파일)
+# inventory_app.py (메인 페이지 파일 - 메모 기능 완전 삭제)
 
 import streamlit as st
 import pandas as pd
@@ -10,15 +10,11 @@ import plotly.express as px
 import json
 import io
 
-# --- 3. Google Drive API 관련 라이브러리 임포트 ---
+# --- Google Drive API 관련 라이브러리 임포트 ---
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
-
-# --- 4. 외부 모듈 임포트 ---
-# memo_manager.py 파일에서 필요한 함수들을 가져옵니다.
-from memo_manager import ensure_memos_loaded, initialize_memo_sidebar, render_sticky_notes
 
 # --- 페이지 설정 (가장 먼저 호출) ---
 st.set_page_config(page_title="데이터 분석 대시보드", layout="wide", initial_sidebar_state="expanded")
@@ -26,11 +22,11 @@ st.set_page_config(page_title="데이터 분석 대시보드", layout="wide", in
 
 # --- 상수 정의 ---
 KOREAN_DAYS = ['월', '화', '수', '목', '금', '토', '일']
-DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive']
+# 메모 기능이 제거되었으므로, 다시 읽기 전용 권한으로 변경
+DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 SM_FILE_ID = "1tRljdvOpp4fITaVEXvoL9mNveNg2qt4p"
 PURCHASE_FILE_ID = "1AgKl29yQ80sTDszLql6oBnd9FnLWf8oR"
 SALES_FILE_ID = "1h-V7kIoInXgGLll7YBW5V_uZdF3Q1PdY"
-MEMO_FILE_ID = "1ZQk9SqudpujLmoP7SXW89DXBZyXpLuQI" 
 SM_QTY_COL_TREND = '잔량(박스)'
 SM_WGT_COL_TREND = '잔량(Kg)'
 REPORT_LOCATION_MAP_TREND = {'신갈냉동': '신갈', '선왕CH4층': '선왕', '신갈김형제': '김형제', '신갈상이품/작업': '상이품', '케이미트스토어': '스토어'}
@@ -331,7 +327,7 @@ def render_main_page_content():
                     if qty_val == 0 and wgt_val == 0: cell_strings.append("-")
                     else:
                         if pd.notnull(diff_val) and len(table_pivot_qty.columns) > 1:
-                            if diff_val > 0.01: indicator = "🔺 "
+                            if diff_val > 0.01: indicator = "� "
                             elif diff_val < -0.01: indicator = "▼ "
                         cell_strings.append(f"{indicator}{base_string}")
                 combined_table[(date_col_ts, KOREAN_DAYS[date_col_ts.weekday()])] = cell_strings
@@ -427,7 +423,7 @@ def render_main_page_content():
                 sales_pivot_kg = df_sales_daily_raw.pivot_table(index=SALES_LOCATION_COL, columns='날짜', values='TotalQtyKg', fill_value=0)
                 sales_pivot_box = sales_pivot_box.reindex(index=SUMMARY_TABLE_LOCATIONS, columns=actual_7day_date_range, fill_value=0)
                 sales_pivot_kg = sales_pivot_kg.reindex(index=SUMMARY_TABLE_LOCATIONS, columns=actual_7day_date_range, fill_value=0)
-                sales_combined_table = pd.DataFrame(index=sales_pivot_box.index, columns=pd.MultiIndex.from_tuples([(d, KOREAN_DAYS[d.weekday()]) for d in sales_pivot_box.columns]), dtype=object)
+                sales_combined_table = pd.DataFrame(index=sales_pivot_box.index, columns=pd.MultiIndex.from_tuples([(d, KOREAN_DAYS[d.weekday()]) for d in sales_combined_table.columns]), dtype=object)
                 daily_sales_totals_box = sales_pivot_box.sum(axis=0)
                 daily_sales_totals_kg = sales_pivot_kg.sum(axis=0)
                 for date_col_obj in sales_pivot_box.columns:
@@ -520,3 +516,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+�
