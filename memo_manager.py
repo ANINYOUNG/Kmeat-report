@@ -23,7 +23,6 @@ def load_memos_from_drive(current_drive_service, file_id):
         content = fh.getvalue().decode('utf-8')
         return json.loads(content) if content else []
     except HttpError:
-        # 파일이 없거나 접근할 수 없는 경우 빈 리스트를 반환합니다.
         return []
     except Exception as e:
         st.sidebar.error(f"메모 로딩 실패: {e}")
@@ -63,14 +62,10 @@ def initialize_memo_sidebar(memo_file_id):
     st.sidebar.markdown("---")
     st.sidebar.subheader("📝 포스트잇 메모")
 
-    if st.sidebar.button("새 포스트잇 추가", use_container_width=True):
+    if st.sidebar.button("새 포스트잇 추가", use_container_width=True, key="add_memo_button"):
         if not current_drive_service:
             st.sidebar.warning("Drive 서비스에 연결되지 않아 메모를 추가할 수 없습니다.")
             return
-        
-        # 버튼 클릭 시점에 메모가 로드되었는지 다시 한번 확인 (안정성 강화)
-        if 'memos' not in st.session_state:
-            st.session_state.memos = []
 
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         new_memo = {
@@ -80,9 +75,10 @@ def initialize_memo_sidebar(memo_file_id):
             "x": 20,
             "y": 20,
         }
+        # ensure_memos_loaded 함수가 먼저 호출되므로, st.session_state.memos는 항상 존재합니다.
         st.session_state.memos.append(new_memo)
         save_memos_to_drive(current_drive_service, memo_file_id, st.session_state.memos)
-        st.rerun()
+        # st.rerun()을 호출하지 않아도, 버튼 클릭 후 스크립트가 자동으로 재실행되어 반영됩니다.
 
 # --- 포스트잇 보드 렌더링 ---
 def render_sticky_notes(memo_file_id):
@@ -94,30 +90,30 @@ def render_sticky_notes(memo_file_id):
         st.warning("Drive 서비스가 연결되지 않아 메모 기능을 사용할 수 없습니다.")
         return
 
-    # HTML 파일 경로를 안정적으로 찾도록 수정
     component_path = "sticky_notes_component.html"
     
     if not os.path.exists(component_path):
-        st.error(f"컴포넌트 파일을 찾을 수 없습니다: '{component_path}'.\n\n이 파일이 inventory_app.py와 같은 폴더에 있는지 확인해주세요.")
+        st.error(f"컴포넌트 파일을 찾을 수 없습니다: '{component_path}'.")
         return
         
     with open(component_path, 'r', encoding='utf-8') as f:
         html_template = f.read()
 
-    # 메모 데이터가 없는 경우를 대비
     if 'memos' not in st.session_state:
         st.session_state.memos = []
 
     component_data = {"memos": st.session_state.memos}
+    
+    # 컴포넌트의 key를 정적으로 유지하여 상태가 유지되도록 함 (오류 해결)
     updated_memos = st.components.v1.html(
         html_template, 
         width=None, 
         height=600,
         scrolling=True,
-        key=f"sticky_notes_{uuid.uuid4()}" # 키를 동적으로 생성하여 재렌더링 보장
+        key="sticky_notes_component" 
     )
 
     if updated_memos and st.session_state.memos != updated_memos:
         st.session_state.memos = updated_memos
         save_memos_to_drive(current_drive_service, memo_file_id, st.session_state.memos)
-        st.rerun()
+        st.rerun() # 외부 컴포넌트에서 값이 변경되었을 때만 재실행

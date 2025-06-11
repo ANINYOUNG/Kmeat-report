@@ -77,7 +77,9 @@ def download_excel_from_drive_as_bytes(_drive_service, file_id, file_name_for_er
         fh = io.BytesIO(); downloader = MediaIoBaseDownload(fh, request); done = False
         while not done: status, done = downloader.next_chunk()
         fh.seek(0); return fh
-    except Exception: return None
+    except Exception as e:
+        st.error(f"파일 다운로드 오류 ({file_name_for_error_msg}): {e}")
+        return None
 
 @st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
 def get_all_available_sheet_dates_from_excel_drive(_drive_service, file_id, file_name_for_error_msg="SM재고현황.xlsx"):
@@ -86,10 +88,16 @@ def get_all_available_sheet_dates_from_excel_drive(_drive_service, file_id, file
     try:
         xls = pd.ExcelFile(fh); sheet_names = xls.sheet_names; valid_dates = []
         for name in sheet_names:
-            try: dt_obj = datetime.datetime.strptime(name, "%Y%m%d").date(); valid_dates.append(dt_obj)
-            except ValueError: continue
-        valid_dates.sort(reverse=True); return valid_dates
-    except Exception: return []
+            try: 
+                dt_obj = datetime.datetime.strptime(name, "%Y%m%d").date()
+                valid_dates.append(dt_obj)
+            except ValueError: 
+                continue
+        valid_dates.sort(reverse=True)
+        return valid_dates
+    except Exception as e:
+        st.warning(f"시트 날짜 조회 오류: {e}")
+        return []
 
 @st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
 def load_sm_data_from_excel_drive(_drive_service, file_id, date_strings_yyyymmdd_list, file_name_for_error_msg="SM재고현황.xlsx"):
@@ -108,8 +116,6 @@ def load_sm_data_from_excel_drive(_drive_service, file_id, date_strings_yyyymmdd
                     if df_sheet.empty: continue
                     required_cols = ['지점명', '상품코드', SM_QTY_COL_TREND, SM_WGT_COL_TREND]
                     if not all(col in df_sheet.columns for col in required_cols):
-                        missing = [col for col in required_cols if col not in df_sheet.columns]
-                        st.warning(f"경고: '{file_name_for_error_msg}' (ID: {file_id}) 파일의 '{date_str}' 시트에 필수 컬럼 {missing} 중 일부가 누락되어 해당 시트를 건너뜁니다.")
                         continue
                     df_sheet_copy = df_sheet.copy()
                     df_sheet_copy['날짜'] = pd.to_datetime(date_str, format='%Y%m%d')
@@ -119,13 +125,11 @@ def load_sm_data_from_excel_drive(_drive_service, file_id, date_strings_yyyymmdd
                     df_processed_sheet['지점명'] = df_processed_sheet['지점명'].astype(str).str.strip()
                     df_processed_sheet['날짜'] = pd.to_datetime(df_processed_sheet['날짜']).dt.normalize()
                     all_data.append(df_processed_sheet)
-                except Exception as e_sheet:
-                    st.warning(f"경고: '{file_name_for_error_msg}' (ID: {file_id}) 파일의 시트 '{date_str}' 처리 중 오류: {e_sheet}")
+                except Exception:
                     continue
         if not all_data: return None
         return pd.concat(all_data, ignore_index=True)
-    except Exception as e_main:
-        st.error(f"오류: '{file_name_for_error_msg}' (ID: {file_id}) 엑셀 파일 로딩 중 주요 오류 발생: {e_main}")
+    except Exception:
         return None
 
 @st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
@@ -140,8 +144,7 @@ def get_latest_date_from_log_drive(_drive_service, file_id, sheet_name, date_col
         df.dropna(subset=[date_col], inplace=True)
         if df.empty: return None
         return df[date_col].max().date()
-    except Exception as e:
-        st.warning(f"경고: '{file_name_for_error_msg}' (ID: {file_id}, 시트: {sheet_name}) 최신 날짜 조회 중 오류: {e}")
+    except Exception:
         return None
 
 @st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
