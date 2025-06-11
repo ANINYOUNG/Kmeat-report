@@ -37,7 +37,7 @@ def save_memos_to_drive(current_drive_service, file_id, memos_data):
             fileId=file_id,
             media_body=media
         ).execute()
-        st.toast("메모가 동기화되었습니다.", icon="🔄")
+        st.toast("메모가 동기화되었습니다.", icon="�")
     except Exception as e:
         st.error(f"메모 저장 실패: {e}")
 
@@ -113,3 +113,5 @@ def render_sticky_notes(memo_file_id):
     if updated_memos and st.session_state.memos != updated_memos:
         st.session_state.memos = updated_memos
         save_memos_to_drive(current_drive_service, memo_file_id, st.session_state.memos)
+
+�

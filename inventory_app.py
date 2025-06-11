@@ -44,23 +44,21 @@ def get_drive_service():
             creds = Credentials.from_service_account_info(creds_dict, scopes=DRIVE_SCOPES)
             return build('drive', 'v3', credentials=creds)
         except Exception as e:
-            st.error(f"클라우드 Secrets 인증 중 오류: {e}")
+            st.sidebar.error(f"클라우드 Secrets 인증 중 오류: {e}")
             return None
     # 로컬 환경에서 실행될 때
     else:
-        # 이 파일 경로는 실제 로컬 경로로 수정해야 합니다.
+        # 로컬 개발 시, 이 파일 경로를 실제 파일 위치에 맞게 수정해야 합니다.
         SERVICE_ACCOUNT_FILE_PATH = "your_service_account.json" 
         if os.path.exists(SERVICE_ACCOUNT_FILE_PATH):
             try:
                 creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE_PATH, scopes=DRIVE_SCOPES)
                 return build('drive', 'v3', credentials=creds)
             except Exception as e:
-                st.error(f"로컬 키 파일 인증 중 오류: {e}")
+                st.sidebar.error(f"로컬 키 파일 인증 중 오류: {e}")
                 return None
         else:
-            # 로컬 개발 시, 이 파일이 없으면 경고 메시지를 표시합니다.
             # 클라우드 배포 시에는 secrets를 사용하므로 이 부분은 무시됩니다.
-            pass # st.warning(f"로컬: 서비스 계정 키 파일 없음: {SERVICE_ACCOUNT_FILE_PATH}")
             return None
 
 # --- Google Drive 파일 ID 정의 ---
@@ -69,7 +67,7 @@ PURCHASE_FILE_ID = "1AgKl29yQ80sTDszLql6oBnd9FnLWf8oR"
 SALES_FILE_ID = "1h-V7kIoInXgGLll7YBW5V_uZdF3Q1PdY"
 MEMO_FILE_ID = "1ZQk9SqudpujLmoP7SXW89DXBZyXpLuQI" 
 
-# --- 데이터 처리용 상수 (이전과 동일) ---
+# --- 데이터 처리용 상수 ---
 SM_QTY_COL_TREND = '잔량(박스)'
 SM_WGT_COL_TREND = '잔량(Kg)'
 REPORT_LOCATION_MAP_TREND = {'신갈냉동': '신갈', '선왕CH4층': '선왕', '신갈김형제': '김형제', '신갈상이품/작업': '상이품', '케이미트스토어': '스토어'}
@@ -85,7 +83,7 @@ SALES_LOG_SHEET_NAME = 's-list'
 SUMMARY_TABLE_LOCATIONS = ['신갈냉동', '선왕CH4층', '신갈김형제', '신갈상이품/작업', '케이미트스토어']
 
 
-# --- 데이터 로딩 함수 (이전과 동일) ---
+# --- 데이터 로딩 함수 ---
 @st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
 def download_excel_from_drive_as_bytes(current_drive_service, file_id, file_name_for_error_msg="Excel file"):
     if current_drive_service is None:
@@ -540,24 +538,20 @@ def render_main_page_content():
     # 데이터 분석 차트 아래에 메모 기능을 추가합니다.
     render_sticky_notes(MEMO_FILE_ID)
 
-
 # --- 앱 실행 부분 ---
-def main():
-    # 1. 앱이 시작될 때 최우선으로 Drive 서비스 객체를 가져와 세션에 저장합니다.
-    if 'drive_service' not in st.session_state:
-        st.session_state.drive_service = get_drive_service()
+# 이 블록은 앱이 시작될 때 가장 먼저 실행됩니다.
+# 1. Drive 서비스 객체를 가져와 세션에 저장합니다. (한 번만 실행됨)
+drive_service = get_drive_service()
 
-    # 2. Drive 서비스가 성공적으로 로드된 경우에만 나머지 UI를 렌더링합니다.
-    if st.session_state.drive_service:
-        # 모든 페이지에서 공통으로 사용할 메모 데이터와 사이드바 버튼을 초기화합니다.
-        ensure_memos_loaded(st.session_state.drive_service, MEMO_FILE_ID)
-        initialize_memo_sidebar(MEMO_FILE_ID)
+# 2. Drive 서비스가 성공적으로 로드된 경우에만 나머지 UI를 렌더링합니다.
+if drive_service:
+    st.session_state.drive_service = drive_service
+    # 모든 페이지에서 공통으로 사용할 메모 데이터와 사이드바 버튼을 초기화합니다.
+    ensure_memos_loaded(st.session_state.drive_service, MEMO_FILE_ID)
+    initialize_memo_sidebar(MEMO_FILE_ID)
 
-        # 현재 페이지의 메인 콘텐츠를 렌더링합니다.
-        # (향후 멀티페이지 앱으로 확장 시, 이 부분을 페이지별로 다르게 구성할 수 있습니다.)
-        render_main_page_content()
-    else:
-        st.error("Google Drive 인증 정보를 로드하지 못했습니다. 앱 설정을 확인하거나 앱을 재시작해주세요.")
+    # 이 페이지의 메인 콘텐츠를 렌더링합니다.
+    render_main_page_content()
+else:
+    st.error("Google Drive 인증 정보를 로드하지 못했습니다. 앱 설정을 확인하거나 앱을 재시작해주세요.")
 
-if __name__ == "__main__":
-    main()
