@@ -1,11 +1,6 @@
-# inventory_app.py (Sticky Notes Component 적용)
+# inventory_app.py (메인 페이지 파일)
 
 import streamlit as st
-
-# --- 1. 페이지 설정 ---
-st.set_page_config(page_title="데이터 분석 대시보드", layout="wide", initial_sidebar_state="expanded")
-
-# --- 2. 기본 라이브러리 임포트 ---
 import pandas as pd
 import datetime
 from dateutil.relativedelta import relativedelta
@@ -14,7 +9,6 @@ import traceback
 import plotly.express as px
 import json
 import io
-import uuid
 
 # --- 3. Google Drive API 관련 라이브러리 임포트 ---
 from google.oauth2.service_account import Credentials
@@ -26,47 +20,17 @@ from googleapiclient.http import MediaIoBaseDownload
 # memo_manager.py 파일에서 필요한 함수들을 가져옵니다.
 from memo_manager import ensure_memos_loaded, initialize_memo_sidebar, render_sticky_notes
 
-# --- 한국어 요일 리스트 ---
+# --- 페이지 설정 (가장 먼저 호출) ---
+st.set_page_config(page_title="데이터 분석 대시보드", layout="wide", initial_sidebar_state="expanded")
+
+
+# --- 상수 정의 ---
 KOREAN_DAYS = ['월', '화', '수', '목', '금', '토', '일']
-
-# --- Google API 인증 및 Drive 서비스 클라이언트 생성 ---
-# 메모 쓰기 기능을 위해 'drive' 전체 권한 사용
 DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive']
-
-@st.cache_resource
-def get_drive_service():
-    """Google Drive 서비스 객체를 생성하고 캐시에 저장합니다."""
-    # 클라우드 환경에서 실행될 때
-    if "google_creds_json" in st.secrets:
-        try:
-            creds_json_str = st.secrets["google_creds_json"]
-            creds_dict = json.loads(creds_json_str)
-            creds = Credentials.from_service_account_info(creds_dict, scopes=DRIVE_SCOPES)
-            return build('drive', 'v3', credentials=creds)
-        except Exception as e:
-            st.sidebar.error(f"클라우드 Secrets 인증 중 오류: {e}")
-            return None
-    # 로컬 환경에서 실행될 때
-    else:
-        # 로컬 개발 시, 이 파일 경로를 실제 파일 위치에 맞게 수정해야 합니다.
-        SERVICE_ACCOUNT_FILE_PATH = "your_service_account.json" 
-        if os.path.exists(SERVICE_ACCOUNT_FILE_PATH):
-            try:
-                creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE_PATH, scopes=DRIVE_SCOPES)
-                return build('drive', 'v3', credentials=creds)
-            except Exception as e:
-                st.sidebar.error(f"로컬 키 파일 인증 중 오류: {e}")
-                return None
-        else:
-            return None
-
-# --- Google Drive 파일 ID 정의 ---
 SM_FILE_ID = "1tRljdvOpp4fITaVEXvoL9mNveNg2qt4p"
 PURCHASE_FILE_ID = "1AgKl29yQ80sTDszLql6oBnd9FnLWf8oR"
 SALES_FILE_ID = "1h-V7kIoInXgGLll7YBW5V_uZdF3Q1PdY"
 MEMO_FILE_ID = "1ZQk9SqudpujLmoP7SXW89DXBZyXpLuQI" 
-
-# --- 데이터 처리용 상수 ---
 SM_QTY_COL_TREND = '잔량(박스)'
 SM_WGT_COL_TREND = '잔량(Kg)'
 REPORT_LOCATION_MAP_TREND = {'신갈냉동': '신갈', '선왕CH4층': '선왕', '신갈김형제': '김형제', '신갈상이품/작업': '상이품', '케이미트스토어': '스토어'}
@@ -82,52 +46,55 @@ SALES_LOG_SHEET_NAME = 's-list'
 SUMMARY_TABLE_LOCATIONS = ['신갈냉동', '선왕CH4층', '신갈김형제', '신갈상이품/작업', '케이미트스토어']
 
 
-# --- 데이터 로딩 함수 ---
-@st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
-def download_excel_from_drive_as_bytes(current_drive_service, file_id, file_name_for_error_msg="Excel file"):
-    if current_drive_service is None:
-        st.error(f"오류: Google Drive 서비스가 초기화되지 않았습니다. ({file_name_for_error_msg} 다운로드 시도)")
-        return None
-    try:
-        request = current_drive_service.files().get_media(fileId=file_id)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-        fh.seek(0)
-        return fh
-    except HttpError as error:
-        st.error(f"오류: '{file_name_for_error_msg}' (ID: {file_id}) 파일 다운로드 실패: {error.resp.status} - {error._get_reason()}. 파일 공유 설정을 확인하세요.")
-        return None
-    except Exception as e:
-        st.error(f"오류: '{file_name_for_error_msg}' (ID: {file_id}) 파일 처리 중 예외 발생: {e}")
+# --- 인증 및 데이터 로딩 함수 ---
+@st.cache_resource
+def get_drive_service():
+    """Google Drive 서비스 객체를 생성하고 캐시에 저장합니다."""
+    if "google_creds_json" in st.secrets:
+        try:
+            creds_dict = json.loads(st.secrets["google_creds_json"])
+            creds = Credentials.from_service_account_info(creds_dict, scopes=DRIVE_SCOPES)
+            return build('drive', 'v3', credentials=creds)
+        except Exception as e:
+            st.sidebar.error(f"클라우드 Secrets 인증 중 오류: {e}")
+            return None
+    else:
+        SERVICE_ACCOUNT_FILE_PATH = "your_service_account.json" 
+        if os.path.exists(SERVICE_ACCOUNT_FILE_PATH):
+            try:
+                creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE_PATH, scopes=DRIVE_SCOPES)
+                return build('drive', 'v3', credentials=creds)
+            except Exception as e:
+                st.sidebar.error(f"로컬 키 파일 인증 중 오류: {e}")
+                return None
         return None
 
 @st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
-def get_all_available_sheet_dates_from_excel_drive(current_drive_service, file_id, file_name_for_error_msg="SM재고현황.xlsx"):
-    fh = download_excel_from_drive_as_bytes(current_drive_service, file_id, file_name_for_error_msg)
+def download_excel_from_drive_as_bytes(_drive_service, file_id, file_name_for_error_msg="Excel file"):
+    if _drive_service is None: return None
+    try:
+        request = _drive_service.files().get_media(fileId=file_id)
+        fh = io.BytesIO(); downloader = MediaIoBaseDownload(fh, request); done = False
+        while not done: status, done = downloader.next_chunk()
+        fh.seek(0); return fh
+    except Exception: return None
+
+@st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
+def get_all_available_sheet_dates_from_excel_drive(_drive_service, file_id, file_name_for_error_msg="SM재고현황.xlsx"):
+    fh = download_excel_from_drive_as_bytes(_drive_service, file_id, file_name_for_error_msg)
     if fh is None: return []
     try:
-        xls = pd.ExcelFile(fh)
-        sheet_names = xls.sheet_names
-        valid_dates = []
+        xls = pd.ExcelFile(fh); sheet_names = xls.sheet_names; valid_dates = []
         for name in sheet_names:
-            try:
-                dt_obj = datetime.datetime.strptime(name, "%Y%m%d").date()
-                valid_dates.append(dt_obj)
-            except ValueError:
-                continue
-        valid_dates.sort(reverse=True)
-        return valid_dates
-    except Exception as e:
-        st.warning(f"경고: '{file_name_for_error_msg}' (ID: {file_id}) 엑셀 파일 시트 목록 조회 중 오류: {e}")
-        return []
+            try: dt_obj = datetime.datetime.strptime(name, "%Y%m%d").date(); valid_dates.append(dt_obj)
+            except ValueError: continue
+        valid_dates.sort(reverse=True); return valid_dates
+    except Exception: return []
 
 @st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
-def load_sm_data_from_excel_drive(current_drive_service, file_id, date_strings_yyyymmdd_list, file_name_for_error_msg="SM재고현황.xlsx"):
+def load_sm_data_from_excel_drive(_drive_service, file_id, date_strings_yyyymmdd_list, file_name_for_error_msg="SM재고현황.xlsx"):
     if not date_strings_yyyymmdd_list: return None
-    fh = download_excel_from_drive_as_bytes(current_drive_service, file_id, file_name_for_error_msg)
+    fh = download_excel_from_drive_as_bytes(_drive_service, file_id, file_name_for_error_msg)
     if fh is None: return None
     all_data = []
     try:
@@ -162,8 +129,8 @@ def load_sm_data_from_excel_drive(current_drive_service, file_id, date_strings_y
         return None
 
 @st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
-def get_latest_date_from_log_drive(current_drive_service, file_id, sheet_name, date_col, file_name_for_error_msg=""):
-    fh = download_excel_from_drive_as_bytes(current_drive_service, file_id, file_name_for_error_msg)
+def get_latest_date_from_log_drive(_drive_service, file_id, sheet_name, date_col, file_name_for_error_msg=""):
+    fh = download_excel_from_drive_as_bytes(_drive_service, file_id, file_name_for_error_msg)
     if fh is None: return None
     try:
         df = pd.read_excel(fh, sheet_name=sheet_name, header=0)
@@ -178,8 +145,8 @@ def get_latest_date_from_log_drive(current_drive_service, file_id, sheet_name, d
         return None
 
 @st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
-def load_daily_log_data_for_period_from_excel_drive(current_drive_service, file_id, sheet_name, date_col, location_col, qty_box_col, qty_kg_col, start_date, end_date, is_purchase_log=False, file_name_for_error_msg=""):
-    fh = download_excel_from_drive_as_bytes(current_drive_service, file_id, file_name_for_error_msg)
+def load_daily_log_data_for_period_from_excel_drive(_drive_service, file_id, sheet_name, date_col, location_col, qty_box_col, qty_kg_col, start_date, end_date, is_purchase_log=False, file_name_for_error_msg=""):
+    fh = download_excel_from_drive_as_bytes(_drive_service, file_id, file_name_for_error_msg)
     if fh is None: return pd.DataFrame()
     try:
         df = pd.read_excel(fh, sheet_name=sheet_name, header=0)
@@ -191,12 +158,9 @@ def load_daily_log_data_for_period_from_excel_drive(current_drive_service, file_
                 if col_to_ffill in df.columns:
                     df[col_to_ffill] = df[col_to_ffill].ffill()
                 elif col_to_ffill == date_col or col_to_ffill == location_col:
-                    st.warning(f"경고: '{file_name_for_error_msg}' (ID: {file_id}, 시트: {sheet_name}) 입고 로그에 필수 ffill 컬럼({col_to_ffill}) 누락.")
                     return pd.DataFrame()
         required_cols_log = [date_col, location_col, qty_box_col, qty_kg_col]
         if not all(col in df.columns for col in required_cols_log):
-            missing_log_cols = [col for col in required_cols_log if col not in df.columns]
-            st.warning(f"경고: '{file_name_for_error_msg}' (ID: {file_id}, 시트: {sheet_name})에 필수 컬럼 {missing_log_cols} 누락.")
             return pd.DataFrame()
         df[date_col] = pd.to_datetime(df[date_col], errors='coerce').dt.normalize()
         df.dropna(subset=[date_col], inplace=True)
@@ -213,13 +177,12 @@ def load_daily_log_data_for_period_from_excel_drive(current_drive_service, file_
         ).reset_index()
         daily_summary.rename(columns={date_col: '날짜'}, inplace=True)
         return daily_summary
-    except Exception as e:
-        st.error(f"오류: '{file_name_for_error_msg}' (ID: {file_id}, 시트: {sheet_name}) 일별 기간 데이터 로딩 중 오류: {e}")
+    except Exception:
         return pd.DataFrame()
 
 @st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
-def load_log_data_for_period_from_excel_drive(current_drive_service, file_id, sheet_name, date_col, qty_kg_col, location_col, start_date, end_date, is_purchase_log=False, file_name_for_error_msg=""):
-    fh = download_excel_from_drive_as_bytes(current_drive_service, file_id, file_name_for_error_msg)
+def load_log_data_for_period_from_excel_drive(_drive_service, file_id, sheet_name, date_col, qty_kg_col, location_col, start_date, end_date, is_purchase_log=False, file_name_for_error_msg=""):
+    fh = download_excel_from_drive_as_bytes(_drive_service, file_id, file_name_for_error_msg)
     if fh is None: return pd.DataFrame()
     try:
         df = pd.read_excel(fh, sheet_name=sheet_name, header=0)
@@ -230,10 +193,8 @@ def load_log_data_for_period_from_excel_drive(current_drive_service, file_id, sh
             for col_to_ffill in ffill_cols:
                 if col_to_ffill in df.columns: df[col_to_ffill] = df[col_to_ffill].ffill()
                 elif col_to_ffill == date_col or col_to_ffill == location_col:
-                    st.warning(f"경고: '{file_name_for_error_msg}' (ID: {file_id}, 시트: {sheet_name}) 입고 로그(월별)에 필수 ffill 컬럼({col_to_ffill}) 누락.")
                     return pd.DataFrame()
         if date_col not in df.columns or qty_kg_col not in df.columns:
-            st.warning(f"경고: '{file_name_for_error_msg}' (ID: {file_id}, 시트: {sheet_name})에 필수 컬럼 ({date_col} 또는 {qty_kg_col}) 누락.")
             return pd.DataFrame()
         df[date_col] = pd.to_datetime(df[date_col], errors='coerce').dt.normalize()
         df.dropna(subset=[date_col], inplace=True)
@@ -245,11 +206,10 @@ def load_log_data_for_period_from_excel_drive(current_drive_service, file_id, sh
         monthly_sum = df_period.groupby('월')[qty_kg_col].sum().reset_index()
         monthly_sum.rename(columns={qty_kg_col: '중량(Kg)'}, inplace=True)
         return monthly_sum
-    except Exception as e:
-        st.error(f"오류: '{file_name_for_error_msg}' (ID: {file_id}, 시트: {sheet_name}) 기간 데이터(월별) 로딩 중 오류: {e}")
+    except Exception:
         return pd.DataFrame()
 
-# --- 페이지 렌더링 함수 정의 ---
+# --- 페이지 렌더링 함수 ---
 def render_main_page_content():
     """메인 페이지의 데이터 분석 콘텐츠를 렌더링합니다."""
     current_drive_service = st.session_state.drive_service
@@ -259,7 +219,7 @@ def render_main_page_content():
     st.markdown(f"<h1 style='text-align: center; margin-bottom: 0.1rem;'>📊 데이터 분석 대시보드 (메인)</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; margin-top: 0.1rem; font-size: 0.9em;'>현재 시간: {current_time_str}</p>", unsafe_allow_html=True)
     
-    st.markdown("---", unsafe_allow_html=True)
+    st.markdown("---")
     st.header("📈 재고 및 물류 현황")
 
     all_available_dates_desc = get_all_available_sheet_dates_from_excel_drive(current_drive_service, SM_FILE_ID, "SM재고현황.xlsx")
@@ -533,28 +493,25 @@ def render_main_page_content():
         df_sales_compare = prepare_comparison_df(df_sales_cy, df_sales_py, "출고")
         plot_comparison_chart(df_sales_compare, "월별 출고 중량 비교")
 
-    # --- 스티커 메모 렌더링 ---
-    # 데이터 분석 차트 아래에 메모 기능을 추가합니다.
-    render_sticky_notes(MEMO_FILE_ID)
-
-# --- 앱 실행 부분 ---
+# --- 앱 실행 로직 ---
 def main():
-    """
-    앱의 메인 실행 함수입니다.
-    인증, 공통 UI 초기화, 페이지별 콘텐츠 렌더링을 담당합니다.
-    """
+    """앱의 메인 실행 함수입니다."""
     # 1. Drive 서비스 객체를 세션 상태에 초기화합니다 (앱 실행 시 한 번만).
     if 'drive_service' not in st.session_state:
         st.session_state.drive_service = get_drive_service()
 
     # 2. Drive 서비스가 성공적으로 로드된 경우에만 나머지 UI를 렌더링합니다.
-    if st.session_state.drive_service:
+    if st.session_state.get('drive_service'):
         # 모든 페이지에서 공통으로 사용할 메모 데이터와 사이드바 버튼을 초기화합니다.
         ensure_memos_loaded(st.session_state.drive_service, MEMO_FILE_ID)
         initialize_memo_sidebar(MEMO_FILE_ID)
 
         # 현재 페이지의 메인 콘텐츠를 렌더링합니다.
         render_main_page_content()
+        
+        # 포스트잇 메모 보드를 렌더링합니다.
+        render_sticky_notes(MEMO_FILE_ID)
+
     else:
         st.error("Google Drive 인증 정보를 로드하지 못했습니다. 앱 설정을 확인하거나 앱을 재시작해주세요.")
 

@@ -25,7 +25,8 @@ def load_memos_from_drive(current_drive_service, file_id):
     except HttpError:
         # 파일이 없거나 접근할 수 없는 경우 빈 리스트를 반환합니다.
         return []
-    except Exception:
+    except Exception as e:
+        st.sidebar.error(f"메모 로딩 실패: {e}")
         return []
 
 def save_memos_to_drive(current_drive_service, file_id, memos_data):
@@ -97,7 +98,7 @@ def render_sticky_notes(memo_file_id):
     component_path = "sticky_notes_component.html"
     
     if not os.path.exists(component_path):
-        st.error(f"컴포넌트 파일을 찾을 수 없습니다: '{component_path}'.\n\n이 파일이 프로젝트의 최상위 폴더에 있는지 확인해주세요.")
+        st.error(f"컴포넌트 파일을 찾을 수 없습니다: '{component_path}'.\n\n이 파일이 inventory_app.py와 같은 폴더에 있는지 확인해주세요.")
         return
         
     with open(component_path, 'r', encoding='utf-8') as f:
@@ -112,10 +113,11 @@ def render_sticky_notes(memo_file_id):
         html_template, 
         width=None, 
         height=600,
-        scrolling=True
+        scrolling=True,
+        key=f"sticky_notes_{uuid.uuid4()}" # 키를 동적으로 생성하여 재렌더링 보장
     )
 
     if updated_memos and st.session_state.memos != updated_memos:
         st.session_state.memos = updated_memos
         save_memos_to_drive(current_drive_service, memo_file_id, st.session_state.memos)
-
+        st.rerun()
