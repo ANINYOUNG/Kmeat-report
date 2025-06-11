@@ -37,7 +37,7 @@ def save_memos_to_drive(current_drive_service, file_id, memos_data):
             fileId=file_id,
             media_body=media
         ).execute()
-        st.toast("메모가 동기화되었습니다.", icon="�")
+        st.toast("메모가 동기화되었습니다.", icon="🔄")
     except Exception as e:
         st.error(f"메모 저장 실패: {e}")
 
@@ -88,15 +88,11 @@ def render_sticky_notes(memo_file_id):
         st.warning("Drive 서비스가 연결되지 않아 메모 기능을 사용할 수 없습니다.")
         return
 
-    # HTML 파일 경로를 스크립트 기준으로 설정 (오류 수정)
-    try:
-        script_dir = os.path.dirname(__file__)
-    except NameError:
-        script_dir = os.getcwd()
-    component_path = os.path.join(script_dir, "sticky_notes_component.html")
+    # HTML 파일 경로를 단순 상대 경로로 변경하여 안정성 향상
+    component_path = "sticky_notes_component.html"
     
     if not os.path.exists(component_path):
-        st.error(f"컴포넌트 파일을 찾을 수 없습니다: {component_path}")
+        st.error(f"컴포넌트 파일을 찾을 수 없습니다: '{component_path}'.\n\n이 파일이 프로젝트의 최상위 폴더에 있는지 확인해주세요.")
         return
         
     with open(component_path, 'r', encoding='utf-8') as f:
@@ -113,5 +109,3 @@ def render_sticky_notes(memo_file_id):
     if updated_memos and st.session_state.memos != updated_memos:
         st.session_state.memos = updated_memos
         save_memos_to_drive(current_drive_service, memo_file_id, st.session_state.memos)
-
-�
