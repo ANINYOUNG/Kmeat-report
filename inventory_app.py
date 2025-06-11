@@ -1,4 +1,4 @@
-# inventory_app.py (메인 페이지 파일 - 메모 기능 완전 삭제)
+# inventory_app.py (메모 기능 완전 삭제 및 코드 초기화)
 
 import streamlit as st
 import pandas as pd
@@ -22,7 +22,7 @@ st.set_page_config(page_title="데이터 분석 대시보드", layout="wide", in
 
 # --- 상수 정의 ---
 KOREAN_DAYS = ['월', '화', '수', '목', '금', '토', '일']
-# 메모 기능이 제거되었으므로, 다시 읽기 전용 권한으로 변경
+# 메모 기능이 완전히 제거되었으므로, 읽기 전용 권한만 사용합니다.
 DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 SM_FILE_ID = "1tRljdvOpp4fITaVEXvoL9mNveNg2qt4p"
 PURCHASE_FILE_ID = "1AgKl29yQ80sTDszLql6oBnd9FnLWf8oR"
@@ -55,6 +55,7 @@ def get_drive_service():
             st.sidebar.error(f"클라우드 Secrets 인증 중 오류: {e}")
             return None
     else:
+        # 로컬 개발 환경을 위한 경로입니다. 실제 파일 위치에 맞게 수정해야 합니다.
         SERVICE_ACCOUNT_FILE_PATH = "your_service_account.json" 
         if os.path.exists(SERVICE_ACCOUNT_FILE_PATH):
             try:
@@ -63,6 +64,7 @@ def get_drive_service():
             except Exception as e:
                 st.sidebar.error(f"로컬 키 파일 인증 중 오류: {e}")
                 return None
+        # 클라우드 배포 시에는 이 부분이 실행되지 않으므로, 오류를 발생시키지 않습니다.
         return None
 
 @st.cache_data(ttl=300, hash_funcs={"googleapiclient.discovery.Resource": lambda _: None})
@@ -70,9 +72,13 @@ def download_excel_from_drive_as_bytes(_drive_service, file_id, file_name_for_er
     if _drive_service is None: return None
     try:
         request = _drive_service.files().get_media(fileId=file_id)
-        fh = io.BytesIO(); downloader = MediaIoBaseDownload(fh, request); done = False
-        while not done: status, done = downloader.next_chunk()
-        fh.seek(0); return fh
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        fh.seek(0)
+        return fh
     except Exception as e:
         st.error(f"파일 다운로드 오류 ({file_name_for_error_msg}): {e}")
         return None
@@ -82,7 +88,9 @@ def get_all_available_sheet_dates_from_excel_drive(_drive_service, file_id, file
     fh = download_excel_from_drive_as_bytes(_drive_service, file_id, file_name_for_error_msg)
     if fh is None: return []
     try:
-        xls = pd.ExcelFile(fh); sheet_names = xls.sheet_names; valid_dates = []
+        xls = pd.ExcelFile(fh)
+        sheet_names = xls.sheet_names
+        valid_dates = []
         for name in sheet_names:
             try: 
                 dt_obj = datetime.datetime.strptime(name, "%Y%m%d").date()
@@ -208,6 +216,7 @@ def load_log_data_for_period_from_excel_drive(_drive_service, file_id, sheet_nam
     except Exception:
         return pd.DataFrame()
 
+
 # --- 페이지 렌더링 함수 ---
 def render_main_page_content():
     """메인 페이지의 데이터 분석 콘텐츠를 렌더링합니다."""
@@ -327,7 +336,7 @@ def render_main_page_content():
                     if qty_val == 0 and wgt_val == 0: cell_strings.append("-")
                     else:
                         if pd.notnull(diff_val) and len(table_pivot_qty.columns) > 1:
-                            if diff_val > 0.01: indicator = "� "
+                            if diff_val > 0.01: indicator = "🔺 "
                             elif diff_val < -0.01: indicator = "▼ "
                         cell_strings.append(f"{indicator}{base_string}")
                 combined_table[(date_col_ts, KOREAN_DAYS[date_col_ts.weekday()])] = cell_strings
@@ -423,7 +432,7 @@ def render_main_page_content():
                 sales_pivot_kg = df_sales_daily_raw.pivot_table(index=SALES_LOCATION_COL, columns='날짜', values='TotalQtyKg', fill_value=0)
                 sales_pivot_box = sales_pivot_box.reindex(index=SUMMARY_TABLE_LOCATIONS, columns=actual_7day_date_range, fill_value=0)
                 sales_pivot_kg = sales_pivot_kg.reindex(index=SUMMARY_TABLE_LOCATIONS, columns=actual_7day_date_range, fill_value=0)
-                sales_combined_table = pd.DataFrame(index=sales_pivot_box.index, columns=pd.MultiIndex.from_tuples([(d, KOREAN_DAYS[d.weekday()]) for d in sales_combined_table.columns]), dtype=object)
+                sales_combined_table = pd.DataFrame(index=sales_pivot_box.index, columns=pd.MultiIndex.from_tuples([(d, KOREAN_DAYS[d.weekday()]) for d in sales_pivot_box.columns]), dtype=object)
                 daily_sales_totals_box = sales_pivot_box.sum(axis=0)
                 daily_sales_totals_kg = sales_pivot_kg.sum(axis=0)
                 for date_col_obj in sales_pivot_box.columns:
@@ -501,19 +510,10 @@ def main():
 
     # 2. Drive 서비스가 성공적으로 로드된 경우에만 나머지 UI를 렌더링합니다.
     if st.session_state.get('drive_service'):
-        # 모든 페이지에서 공통으로 사용할 메모 데이터와 사이드바 버튼을 초기화합니다.
-        ensure_memos_loaded(st.session_state.drive_service, MEMO_FILE_ID)
-        initialize_memo_sidebar(MEMO_FILE_ID)
-
-        # 현재 페이지의 메인 콘텐츠를 렌더링합니다.
+        # 메인 페이지 콘텐츠를 렌더링합니다.
         render_main_page_content()
-        
-        # 포스트잇 메모 보드를 렌더링합니다.
-        render_sticky_notes(MEMO_FILE_ID)
-
     else:
         st.error("Google Drive 인증 정보를 로드하지 못했습니다. 앱 설정을 확인하거나 앱을 재시작해주세요.")
 
 if __name__ == "__main__":
     main()
-�
