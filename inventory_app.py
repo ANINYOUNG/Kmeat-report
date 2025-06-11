@@ -58,7 +58,6 @@ def get_drive_service():
                 st.sidebar.error(f"로컬 키 파일 인증 중 오류: {e}")
                 return None
         else:
-            # 클라우드 배포 시에는 secrets를 사용하므로 이 부분은 무시됩니다.
             return None
 
 # --- Google Drive 파일 ID 정의 ---
@@ -539,19 +538,25 @@ def render_main_page_content():
     render_sticky_notes(MEMO_FILE_ID)
 
 # --- 앱 실행 부분 ---
-# 이 블록은 앱이 시작될 때 가장 먼저 실행됩니다.
-# 1. Drive 서비스 객체를 가져와 세션에 저장합니다. (한 번만 실행됨)
-drive_service = get_drive_service()
+def main():
+    """
+    앱의 메인 실행 함수입니다.
+    인증, 공통 UI 초기화, 페이지별 콘텐츠 렌더링을 담당합니다.
+    """
+    # 1. Drive 서비스 객체를 세션 상태에 초기화합니다 (앱 실행 시 한 번만).
+    if 'drive_service' not in st.session_state:
+        st.session_state.drive_service = get_drive_service()
 
-# 2. Drive 서비스가 성공적으로 로드된 경우에만 나머지 UI를 렌더링합니다.
-if drive_service:
-    st.session_state.drive_service = drive_service
-    # 모든 페이지에서 공통으로 사용할 메모 데이터와 사이드바 버튼을 초기화합니다.
-    ensure_memos_loaded(st.session_state.drive_service, MEMO_FILE_ID)
-    initialize_memo_sidebar(MEMO_FILE_ID)
+    # 2. Drive 서비스가 성공적으로 로드된 경우에만 나머지 UI를 렌더링합니다.
+    if st.session_state.drive_service:
+        # 모든 페이지에서 공통으로 사용할 메모 데이터와 사이드바 버튼을 초기화합니다.
+        ensure_memos_loaded(st.session_state.drive_service, MEMO_FILE_ID)
+        initialize_memo_sidebar(MEMO_FILE_ID)
 
-    # 이 페이지의 메인 콘텐츠를 렌더링합니다.
-    render_main_page_content()
-else:
-    st.error("Google Drive 인증 정보를 로드하지 못했습니다. 앱 설정을 확인하거나 앱을 재시작해주세요.")
+        # 현재 페이지의 메인 콘텐츠를 렌더링합니다.
+        render_main_page_content()
+    else:
+        st.error("Google Drive 인증 정보를 로드하지 못했습니다. 앱 설정을 확인하거나 앱을 재시작해주세요.")
 
+if __name__ == "__main__":
+    main()

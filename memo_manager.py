@@ -23,6 +23,7 @@ def load_memos_from_drive(current_drive_service, file_id):
         content = fh.getvalue().decode('utf-8')
         return json.loads(content) if content else []
     except HttpError:
+        # 파일이 없거나 접근할 수 없는 경우 빈 리스트를 반환합니다.
         return []
     except Exception:
         return []
@@ -65,6 +66,10 @@ def initialize_memo_sidebar(memo_file_id):
         if not current_drive_service:
             st.sidebar.warning("Drive 서비스에 연결되지 않아 메모를 추가할 수 없습니다.")
             return
+        
+        # 버튼 클릭 시점에 메모가 로드되었는지 다시 한번 확인 (안정성 강화)
+        if 'memos' not in st.session_state:
+            st.session_state.memos = []
 
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         new_memo = {
@@ -88,7 +93,7 @@ def render_sticky_notes(memo_file_id):
         st.warning("Drive 서비스가 연결되지 않아 메모 기능을 사용할 수 없습니다.")
         return
 
-    # HTML 파일 경로를 단순 상대 경로로 변경하여 안정성 향상
+    # HTML 파일 경로를 안정적으로 찾도록 수정
     component_path = "sticky_notes_component.html"
     
     if not os.path.exists(component_path):
@@ -97,6 +102,10 @@ def render_sticky_notes(memo_file_id):
         
     with open(component_path, 'r', encoding='utf-8') as f:
         html_template = f.read()
+
+    # 메모 데이터가 없는 경우를 대비
+    if 'memos' not in st.session_state:
+        st.session_state.memos = []
 
     component_data = {"memos": st.session_state.memos}
     updated_memos = st.components.v1.html(
@@ -109,3 +118,4 @@ def render_sticky_notes(memo_file_id):
     if updated_memos and st.session_state.memos != updated_memos:
         st.session_state.memos = updated_memos
         save_memos_to_drive(current_drive_service, memo_file_id, st.session_state.memos)
+
