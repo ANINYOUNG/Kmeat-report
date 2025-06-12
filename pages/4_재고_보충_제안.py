@@ -1,4 +1,4 @@
-# pages/4_재고_보충_제안.py (최종 완성본)
+# pages/4_재고_보충_제안.py
 
 import streamlit as st
 import pandas as pd
